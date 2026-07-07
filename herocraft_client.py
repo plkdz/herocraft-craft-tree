@@ -2,13 +2,14 @@ from __future__ import annotations
 
 # 文件职责：封装 HeroCraft HTTP API、本机明文缓存、请求并发闸门和对象解析。
 
+import concurrent.futures
+import http.client
 import json
 import os
 import socket
 import threading
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,8 @@ class ClientConfig:
 class HeroCraftClient:
     def __init__(self, config: ClientConfig, progress: ProgressStats | None = None) -> None:
         self._config = config
+        self._base_url_parts = urllib.parse.urlparse(config.base_url)
+        self._thread_local = threading.local()
         self._detail_cache_lock = threading.RLock()
         self._base_depth_cache_lock = threading.RLock()
         self._cache_save_lock = threading.Lock()
@@ -113,23 +116,65 @@ class HeroCraftClient:
         if self._details_since_save >= 100:
             self.save_cache()
 
+    def _connection_key(self) -> tuple[str, str, int]:
+        scheme = self._base_url_parts.scheme or "http"
+        host = self._base_url_parts.hostname
+        if host is None:
+            raise RuntimeError(f"API 基址缺少 host：{self._config.base_url}")
+        port = self._base_url_parts.port or (443 if scheme == "https" else 80)
+        return scheme, host, port
+
+    def _thread_connection(self) -> http.client.HTTPConnection:
+        scheme, host, port = self._connection_key()
+        key = f"{scheme}:{host}:{port}"
+        current_key = getattr(self._thread_local, "connection_key", "")
+        connection = getattr(self._thread_local, "connection", None)
+        if current_key == key and isinstance(connection, http.client.HTTPConnection):
+            return connection
+        if isinstance(connection, http.client.HTTPConnection):
+            connection.close()
+        if scheme == "https":
+            connection = http.client.HTTPSConnection(host, port, timeout=self._config.timeout_seconds)
+        elif scheme == "http":
+            connection = http.client.HTTPConnection(host, port, timeout=self._config.timeout_seconds)
+        else:
+            raise RuntimeError(f"不支持的 API 协议：{scheme}")
+        self._thread_local.connection_key = key
+        self._thread_local.connection = connection
+        return connection
+
+    def _request_json_keep_alive(self, path: str) -> Any:
+        base_path = self._base_url_parts.path.rstrip("/")
+        full_path = f"{base_path}{path}" if base_path else path
+        connection = self._thread_connection()
+        headers = {
+            "Accept": "application/json",
+            "Cookie": f"hc_session={self._config.session_cookie}",
+            "Connection": "keep-alive",
+        }
+        try:
+            connection.request("GET", full_path, headers=headers)
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+        except (OSError, http.client.HTTPException):
+            connection.close()
+            self._thread_local.connection = None
+            connection = self._thread_connection()
+            connection.request("GET", full_path, headers=headers)
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+        if response.status >= 400:
+            raise RuntimeError(f"HTTP {response.status} {path}: {body}")
+        return json.loads(body)
+
     def request_json(self, path: str) -> Any:
-        url = f"{self._config.base_url}{path}"
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "Cookie": f"hc_session={self._config.session_cookie}",
-            },
-            method="GET",
-        )
         try:
             with self._request_semaphore:
-                with urllib.request.urlopen(request, timeout=self._config.timeout_seconds) as response:
-                    return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {exc.code} {path}: {body}") from exc
+                return self._request_json_keep_alive(path)
+        except (OSError, http.client.HTTPException) as exc:
+            raise RuntimeError(f"请求失败 {path}: {exc}") from exc
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"返回不是 JSON {path}: {exc}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"请求失败 {path}: {exc.reason}") from exc
         except socket.timeout as exc:
@@ -177,21 +222,25 @@ class HeroCraftClient:
         if self._mine_cache is not None:
             return self._mine_cache
 
-        offset = 0
         limit = 500
-        objects: list[ApiObject] = []
-        while True:
+        def fetch_page(offset: int) -> ObjectPage:
             query = urllib.parse.urlencode({"limit": limit, "offset": offset})
             page = self.request_json(f"/objects/mine?{query}")
             if not isinstance(page, dict):
                 raise RuntimeError("/objects/mine 返回不是分页对象")
-            typed_page: ObjectPage = page
-            items = typed_page.get("items", [])
-            objects.extend(items)
-            if not items or len(objects) >= typed_page.get("total", len(objects)):
-                break
-            offset += typed_page.get("limit", limit)
+            return page
 
+        first_page = fetch_page(0)
+        total = first_page.get("total", len(first_page.get("items", [])))
+        offsets = list(range(limit, total, limit))
+        pages: list[ObjectPage] = [first_page]
+        if offsets:
+            worker_count = min(self._config.max_workers, len(offsets))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+                pages.extend(executor.map(fetch_page, offsets))
+        objects: list[ApiObject] = []
+        for page in sorted(pages, key=lambda item: item.get("offset", 0)):
+            objects.extend(page.get("items", []))
         self._mine_cache = objects
         return objects
 

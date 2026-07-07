@@ -3,7 +3,8 @@ from __future__ import annotations
 # 文件职责：专门同步 HeroCraft 本机缓存；刷新物品栏，并按物品 id 每个详情请求一次。
 #
 # 常用命令：
-# python sync_cache.py --workers 20 --request-limit 100
+# python sync_cache.py --workers 100 --request-limit 1000
+# python sync_cache.py --missing-only --workers 100 --request-limit 1000
 
 import argparse
 import concurrent.futures
@@ -33,9 +34,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--base-url", default=BASE_URL, help="API 基址")
     parser.add_argument("--cache-dir", default=CACHE_DIR, help="本机缓存目录")
-    parser.add_argument("--workers", type=int, default=20, help="并发请求对象详情数量")
-    parser.add_argument("--request-limit", type=int, default=100, help="同时 HTTP 请求上限")
+    parser.add_argument("--workers", type=int, default=100, help="并发请求对象详情数量")
+    parser.add_argument("--request-limit", type=int, default=1000, help="同时 HTTP 请求上限")
     parser.add_argument("--timeout", type=float, default=15.0, help="单次请求超时秒数")
+    parser.add_argument("--missing-only", action="store_true", help="只补齐本机没有详情缓存的对象")
     return parser.parse_args()
 
 
@@ -49,6 +51,11 @@ def unique_inventory_ids(items: list[ApiObject]) -> list[int]:
         seen.add(object_id)
         object_ids.append(object_id)
     return object_ids
+
+
+def missing_detail_ids(client: HeroCraftClient, object_ids: list[int]) -> list[int]:
+    cached_ids = set(client.detail_cache_snapshot())
+    return [object_id for object_id in object_ids if object_id not in cached_ids]
 
 
 def refresh_details(client: HeroCraftClient, object_ids: list[int]) -> None:
@@ -98,6 +105,8 @@ def main() -> None:
         progress.phase = "同步物品栏"
         inventory = client.my_objects()
         object_ids = unique_inventory_ids(inventory)
+        if args.missing_only:
+            object_ids = missing_detail_ids(client, object_ids)
         print(f"\n物品栏对象：{len(inventory)} 个；去重后详情请求：{len(object_ids)} 个", file=sys.stderr)
         progress.phase = "同步对象详情"
         refresh_details(client, object_ids)
