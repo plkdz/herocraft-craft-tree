@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import html
 import os
 import sys
 import time
@@ -143,6 +144,11 @@ def blocker_output_path(output_path: str) -> str:
     return f"{stem}_blockers.txt"
 
 
+def blocker_html_output_path(output_path: str) -> str:
+    stem, _ = os.path.splitext(output_path)
+    return f"{stem}_blockers.html"
+
+
 def build_blocker_report(
     scored_blockers: list[tuple[ApiObject, list[ApiObject]]],
     *,
@@ -166,6 +172,142 @@ def build_blocker_report(
         lines.append(f"{index}. {format_object(obj, show_id=show_id)} | 影响不可达对象 {len(affected_objects)} 个")
         lines.extend(f"   - {format_object(affected, show_id=show_id)}" for affected in affected_objects)
     return "\n".join(lines) + "\n"
+
+
+def build_blocker_html_report(
+    scored_blockers: list[tuple[ApiObject, list[ApiObject]]],
+    *,
+    target: ApiObject,
+    unreachable_count: int,
+    show_id: bool,
+) -> str:
+    title = f"不可达阻塞图 - {format_object(target, show_id=show_id)}"
+    sections: list[str] = []
+    for index, (blocker, affected_objects) in enumerate(scored_blockers, start=1):
+        affected_nodes = "\n".join(
+            f"<div class=\"tree-node affected-node\">{html.escape(format_object(affected, show_id=show_id))}</div>"
+            for affected in affected_objects
+        )
+        sections.append(
+            "<section class=\"blocker-tree\">"
+            f"<div class=\"tree-node blocker-node\"><span>#{index} {html.escape(format_object(blocker, show_id=show_id))}</span>"
+            f"<small>影响 {len(affected_objects)} 个不可达对象</small></div>"
+            f"<div class=\"affected-row\">{affected_nodes}</div>"
+            "</section>"
+        )
+    body = "\n".join(sections)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>{html.escape(title)}</title>
+  <style>
+    body {{
+      margin: 0;
+      padding: 24px;
+      background: #f6f7f2;
+      color: #1f2933;
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 22px;
+    }}
+    .meta {{
+      margin: 0 0 18px;
+      color: #647063;
+      font-size: 14px;
+    }}
+    .blocker-tree {{
+      position: relative;
+      width: max-content;
+      min-width: 100%;
+      margin: 18px 0 34px;
+      padding-top: 4px;
+      text-align: center;
+    }}
+    .tree-node {{
+      position: relative;
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 180px;
+      max-width: 260px;
+      min-height: 34px;
+      padding: 7px 10px;
+      border: 1px solid #cfd8ca;
+      border-radius: 7px;
+      background: #fffefa;
+      box-shadow: 0 4px 14px #1a24170f;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }}
+    .blocker-node {{
+      flex-direction: column;
+      max-width: 320px;
+      border-color: #d5a642;
+      background: #fff8df;
+    }}
+    .blocker-node small {{
+      margin-top: 4px;
+      color: #8a5c00;
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    .affected-row {{
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 14px;
+      margin-top: 0;
+      padding-top: 56px;
+    }}
+    .affected-row::before {{
+      content: "";
+      position: absolute;
+      z-index: 1;
+      top: 0;
+      left: 50%;
+      width: 1px;
+      height: 28px;
+      background: #b9c5b3;
+    }}
+    .affected-row::after {{
+      content: "";
+      position: absolute;
+      z-index: 1;
+      top: 28px;
+      left: 120px;
+      right: 120px;
+      height: 1px;
+      background: #b9c5b3;
+    }}
+    .affected-row:has(> .tree-node:only-child)::after {{
+      display: none;
+    }}
+    .affected-node::before {{
+      content: "";
+      position: absolute;
+      z-index: 1;
+      top: -28px;
+      left: 50%;
+      width: 1px;
+      height: 28px;
+      background: #b9c5b3;
+    }}
+  </style>
+</head>
+<body>
+  <h1>{html.escape(title)}</h1>
+  <p class="meta">基础不可达链条对象：{unreachable_count} 个；底层阻塞点：{len(scored_blockers)} 个。排序规则：影响不可达对象越多越靠前。</p>
+  {body}
+</body>
+</html>
+"""
 
 
 def parse_args() -> argparse.Namespace:
@@ -381,12 +523,23 @@ def main() -> None:
             with open(output_path, "w", encoding="utf-8") as file:
                 file.write(content)
             blockers_path = ""
+            blockers_html_path = ""
             if scored_blockers:
                 blockers_path = blocker_output_path(output_path)
+                blockers_html_path = blocker_html_output_path(output_path)
                 with open(blockers_path, "w", encoding="utf-8") as file:
                     file.write(
                         build_blocker_report(
                             scored_blockers,
+                            unreachable_count=len(unreachable_ids),
+                            show_id=bool(args.show_id),
+                        )
+                    )
+                with open(blockers_html_path, "w", encoding="utf-8") as file:
+                    file.write(
+                        build_blocker_html_report(
+                            scored_blockers,
+                            target=target,
                             unreachable_count=len(unreachable_ids),
                             show_id=bool(args.show_id),
                         )
@@ -421,6 +574,8 @@ def main() -> None:
             print(f"已写入：{output_path}", file=sys.stderr)
             if blockers_path:
                 print(f"底层阻塞点完整列表：{blockers_path}", file=sys.stderr)
+            if blockers_html_path:
+                print(f"底层阻塞点树状图：{blockers_html_path}", file=sys.stderr)
     except RuntimeError as exc:
         client.save_cache()
         progress.finish()
