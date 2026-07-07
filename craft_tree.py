@@ -68,23 +68,61 @@ def collect_unreachable_leaf_blockers(
     return blockers
 
 
+def score_unreachable_blockers(
+    detail_snapshot: dict[int, ApiObject],
+    unreachable_ids: set[int],
+    blockers: list[ApiObject],
+) -> list[tuple[ApiObject, int]]:
+    blocker_ids = {require_id(obj) for obj in blockers}
+
+    def leaf_blockers_for(object_id: int, visiting: set[int]) -> set[int]:
+        if object_id in blocker_ids:
+            return {object_id}
+        if object_id in visiting:
+            return set()
+        obj = detail_snapshot.get(object_id)
+        if obj is None:
+            return set()
+        result: set[int] = set()
+        for source in iter_sources(obj):
+            for ingredient in (source["ingredient_a"], source["ingredient_b"]):
+                ingredient_id = require_id(ingredient)
+                if ingredient_id in unreachable_ids:
+                    result.update(leaf_blockers_for(ingredient_id, visiting | {object_id}))
+        return result
+
+    impact_counts = {object_id: 0 for object_id in blocker_ids}
+    for object_id in unreachable_ids:
+        for blocker_id in leaf_blockers_for(object_id, set()):
+            impact_counts[blocker_id] += 1
+
+    return sorted(
+        ((obj, impact_counts[require_id(obj)]) for obj in blockers),
+        key=lambda item: (-item[1], format_object(item[0]), require_id(item[0])),
+    )
+
+
 def blocker_output_path(output_path: str) -> str:
     stem, _ = os.path.splitext(output_path)
     return f"{stem}_blockers.txt"
 
 
 def build_blocker_report(
-    blockers: list[ApiObject],
+    scored_blockers: list[tuple[ApiObject, int]],
     *,
     unreachable_count: int,
     show_id: bool,
 ) -> str:
     lines = [
         f"基础不可达链条对象：{unreachable_count} 个",
-        f"底层阻塞点：{len(blockers)} 个",
+        f"底层阻塞点：{len(scored_blockers)} 个",
+        "排序规则：影响不可达链条对象越多，越应该优先合成",
         "",
     ]
-    lines.extend(format_object(obj, show_id=show_id) for obj in blockers)
+    lines.extend(
+        f"{index}. {format_object(obj, show_id=show_id)} | 影响不可达对象 {impact_count} 个"
+        for index, (obj, impact_count) in enumerate(scored_blockers, start=1)
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -272,17 +310,18 @@ def main() -> None:
             and not is_base_object(detail_snapshot[object_id], base_ids=base_ids, base_names=base_names)
         }
         unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
+        scored_blockers = score_unreachable_blockers(detail_snapshot, unreachable_ids, unreachable_blockers)
         output_path = str(args.output) if args.output else default_output_path(target, output_format)
         if output_path:
             with open(output_path, "w", encoding="utf-8") as file:
                 file.write(content)
             blockers_path = ""
-            if unreachable_blockers:
+            if scored_blockers:
                 blockers_path = blocker_output_path(output_path)
                 with open(blockers_path, "w", encoding="utf-8") as file:
                     file.write(
                         build_blocker_report(
-                            unreachable_blockers,
+                            scored_blockers,
                             unreachable_count=len(unreachable_ids),
                             show_id=bool(args.show_id),
                         )
@@ -296,11 +335,13 @@ def main() -> None:
                 print("配方显示：只显示基础可达的最短配方；如需全部配方，加 --show-all-sources", file=sys.stderr)
             else:
                 print("配方显示：全部已知配方", file=sys.stderr)
-            if unreachable_blockers:
-                preview = "，".join(format_object(obj) for obj in unreachable_blockers[:12])
-                suffix = "..." if len(unreachable_blockers) > 12 else ""
+            if scored_blockers:
+                preview = "，".join(
+                    f"{format_object(obj)}({impact_count})" for obj, impact_count in scored_blockers[:12]
+                )
+                suffix = "..." if len(scored_blockers) > 12 else ""
                 print(
-                    f"当前深度内基础不可达链条对象：{len(unreachable_ids)} 个；底层阻塞点：{len(unreachable_blockers)} 个。示例：{preview}{suffix}",
+                    f"当前深度内基础不可达链条对象：{len(unreachable_ids)} 个；底层阻塞点：{len(scored_blockers)} 个。按影响数排序：{preview}{suffix}",
                     file=sys.stderr,
                 )
             elif unreachable_ids:
