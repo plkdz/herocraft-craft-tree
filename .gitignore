@@ -1,0 +1,6 @@
+.herocraft_session
+.herocraft_cache/
+results/
+__pycache__/
+*.py[cod]
+tmp_herocraft_*.log
