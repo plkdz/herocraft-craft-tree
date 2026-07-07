@@ -184,15 +184,48 @@ def build_blocker_html_report(
     title = f"不可达阻塞图 - {format_object(target, show_id=show_id)}"
     sections: list[str] = []
     for index, (blocker, affected_objects) in enumerate(scored_blockers, start=1):
-        affected_nodes = "\n".join(
-            f"<div class=\"tree-node affected-node\">{html.escape(format_object(affected, show_id=show_id))}</div>"
-            for affected in affected_objects
-        )
+        affected_by_id = {require_id(obj): obj for obj in affected_objects}
+        child_ids_by_parent: dict[int, set[int]] = {}
+        for obj in affected_objects:
+            object_id = require_id(obj)
+            for source in iter_sources(obj):
+                for ingredient in (source["ingredient_a"], source["ingredient_b"]):
+                    ingredient_id = require_id(ingredient)
+                    if ingredient_id in affected_by_id and ingredient_id != object_id:
+                        child_ids_by_parent.setdefault(ingredient_id, set()).add(object_id)
+        expanded_ids: set[int] = set()
+
+        def direct_children(parent_id: int) -> list[ApiObject]:
+            return [
+                affected_by_id[child_id]
+                for child_id in sorted(child_ids_by_parent.get(parent_id, set()))
+            ]
+
+        def render_dependency_node(obj: ApiObject, path: set[int], *, is_root: bool = False) -> str:
+            object_id = require_id(obj)
+            node_class = "tree-node blocker-node" if is_root else "tree-node affected-node"
+            label = html.escape(format_object(obj, show_id=show_id))
+            if object_id in path:
+                return f"<div class=\"tree-branch\"><div class=\"{node_class} cycle-node\">{label}<small>当前路径循环</small></div></div>"
+            if object_id in expanded_ids and not is_root:
+                return f"<div class=\"tree-branch\"><div class=\"{node_class} dedup-node\">{label}<small>已在本树展开</small></div></div>"
+            expanded_ids.add(object_id)
+            children = [
+                child
+                for child in direct_children(object_id)
+                if require_id(child) in affected_by_id
+            ]
+            child_html = "".join(
+                render_dependency_node(child, path | {object_id}) for child in children
+            )
+            meta = f"<small>影响 {len(affected_objects)} 个不可达对象</small>" if is_root else ""
+            children_block = f"<div class=\"child-row\">{child_html}</div>" if child_html else ""
+            return f"<div class=\"tree-branch\"><div class=\"{node_class}\">{label}{meta}</div>{children_block}</div>"
+
         sections.append(
             "<section class=\"blocker-tree\">"
-            f"<div class=\"tree-node blocker-node\"><span>#{index} {html.escape(format_object(blocker, show_id=show_id))}</span>"
-            f"<small>影响 {len(affected_objects)} 个不可达对象</small></div>"
-            f"<div class=\"affected-row\">{affected_nodes}</div>"
+            f"<div class=\"tree-title\">#{index}</div>"
+            f"{render_dependency_node(blocker, set(), is_root=True)}"
             "</section>"
         )
     body = "\n".join(sections)
@@ -226,6 +259,18 @@ def build_blocker_html_report(
       padding-top: 4px;
       text-align: center;
     }}
+    .tree-title {{
+      margin-bottom: 8px;
+      color: #647063;
+      font-weight: 700;
+    }}
+    .tree-branch {{
+      position: relative;
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: top;
+    }}
     .tree-node {{
       position: relative;
       z-index: 2;
@@ -257,7 +302,23 @@ def build_blocker_html_report(
       font-size: 13px;
       font-weight: 700;
     }}
-    .affected-row {{
+    .cycle-node {{
+      border-color: #d7a092;
+      background: #fff7f4;
+      color: #9a3f2d;
+    }}
+    .dedup-node {{
+      border-color: #aab6d8;
+      background: #f3f5ff;
+      color: #4f5c7a;
+    }}
+    .cycle-node small,
+    .dedup-node small {{
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+    }}
+    .child-row {{
       position: relative;
       display: flex;
       align-items: flex-start;
@@ -266,7 +327,7 @@ def build_blocker_html_report(
       margin-top: 0;
       padding-top: 56px;
     }}
-    .affected-row::before {{
+    .child-row::before {{
       content: "";
       position: absolute;
       z-index: 1;
@@ -276,7 +337,7 @@ def build_blocker_html_report(
       height: 28px;
       background: #b9c5b3;
     }}
-    .affected-row::after {{
+    .child-row::after {{
       content: "";
       position: absolute;
       z-index: 1;
@@ -286,10 +347,10 @@ def build_blocker_html_report(
       height: 1px;
       background: #b9c5b3;
     }}
-    .affected-row:has(> .tree-node:only-child)::after {{
+    .child-row:has(> .tree-branch:only-child)::after {{
       display: none;
     }}
-    .affected-node::before {{
+    .child-row > .tree-branch::before {{
       content: "";
       position: absolute;
       z-index: 1;
