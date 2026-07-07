@@ -536,7 +536,7 @@ def build_blocker_html_report(
 
     viewport.addEventListener("pointerup", stopDrag);
     viewport.addEventListener("pointercancel", stopDrag);
-    applyTransform();
+    resetView();
   </script>
 </body>
 </html>

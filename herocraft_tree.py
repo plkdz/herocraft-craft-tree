@@ -1225,7 +1225,7 @@ def build_html_document(
     }});
     viewport.addEventListener("pointercancel", stopDrag);
     layoutRecipeRows();
-    applyTransform();
+    resetView();
   </script>
 </body>
 </html>
