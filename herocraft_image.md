@@ -6,7 +6,8 @@
 
 - 查找本机 Edge 或 Chrome；也可用环境变量 `HEROCRAFT_BROWSER` 指定浏览器路径。
 - 复制一份临时 HTML，把初始脚本改成 `setAllDetails(true)`，用于截图前全部展开。
-- 通过 Chrome DevTools Protocol 打开 HTML，读取页面完整宽高。
+- 通过 Chrome DevTools Protocol 打开 HTML，截图前解除 `.tree-viewport` 的固定视口裁剪并清掉平移缩放。
+- 读取解除裁剪后的页面完整宽高。
 - 使用 `Page.captureScreenshot(captureBeyondViewport=true)` 输出 PNG，避免只截当前视口。
 
 入口函数：

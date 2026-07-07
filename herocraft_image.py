@@ -204,8 +204,35 @@ def render_html_image(html_path: str, image_path: str, *, width: int, height: in
                     message_id,
                     "Runtime.evaluate",
                     {
-                        "expression": "(() => { setAllDetails(true); return { width: Math.ceil(document.documentElement.scrollWidth), height: Math.ceil(document.documentElement.scrollHeight) }; })()",
+                        "expression": """
+(async () => {
+  setAllDetails(true);
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const viewport = document.getElementById("viewport");
+  const canvas = document.getElementById("treeCanvas");
+  if (viewport) {
+    viewport.style.width = "max-content";
+    viewport.style.height = "auto";
+    viewport.style.overflow = "visible";
+    viewport.style.border = "0";
+  }
+  if (canvas) {
+    canvas.style.transform = "none";
+  }
+  document.documentElement.style.width = "max-content";
+  document.documentElement.style.height = "auto";
+  document.body.style.width = "max-content";
+  document.body.style.height = "auto";
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const rect = canvas ? canvas.getBoundingClientRect() : document.body.getBoundingClientRect();
+  return {
+    width: Math.ceil(Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, rect.right + 24)),
+    height: Math.ceil(Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, rect.bottom + 24))
+  };
+})()
+""",
                         "returnByValue": True,
+                        "awaitPromise": True,
                     },
                 )
                 message_id += 1
@@ -233,6 +260,13 @@ def render_html_image(html_path: str, image_path: str, *, width: int, height: in
                         "format": "png",
                         "fromSurface": True,
                         "captureBeyondViewport": True,
+                        "clip": {
+                            "x": 0,
+                            "y": 0,
+                            "width": page_width,
+                            "height": page_height,
+                            "scale": 1,
+                        },
                     },
                 )
                 data = screenshot.get("data")
