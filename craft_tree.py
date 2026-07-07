@@ -68,6 +68,26 @@ def collect_unreachable_leaf_blockers(
     return blockers
 
 
+def blocker_output_path(output_path: str) -> str:
+    stem, _ = os.path.splitext(output_path)
+    return f"{stem}_blockers.txt"
+
+
+def build_blocker_report(
+    blockers: list[ApiObject],
+    *,
+    unreachable_count: int,
+    show_id: bool,
+) -> str:
+    lines = [
+        f"基础不可达链条对象：{unreachable_count} 个",
+        f"底层阻塞点：{len(blockers)} 个",
+        "",
+    ]
+    lines.extend(format_object(obj, show_id=show_id) for obj in blockers)
+    return "\n".join(lines) + "\n"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="查询 HeroCraft 已发现物品的完整合成树")
     parser.add_argument(
@@ -256,6 +276,17 @@ def main() -> None:
         if output_path:
             with open(output_path, "w", encoding="utf-8") as file:
                 file.write(content)
+            blockers_path = ""
+            if unreachable_blockers:
+                blockers_path = blocker_output_path(output_path)
+                with open(blockers_path, "w", encoding="utf-8") as file:
+                    file.write(
+                        build_blocker_report(
+                            unreachable_blockers,
+                            unreachable_count=len(unreachable_ids),
+                            show_id=bool(args.show_id),
+                        )
+                    )
             progress.finish()
             if base_route_depth is None:
                 print(f"基础合成路线：未在深度 {int(args.max_depth)} 内找到", file=sys.stderr)
@@ -281,6 +312,8 @@ def main() -> None:
                 print("当前深度内基础不可达链条对象：0 个；底层阻塞点：0 个", file=sys.stderr)
             client.save_cache()
             print(f"已写入：{output_path}", file=sys.stderr)
+            if blockers_path:
+                print(f"底层阻塞点完整列表：{blockers_path}", file=sys.stderr)
     except RuntimeError as exc:
         client.save_cache()
         progress.finish()
