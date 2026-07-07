@@ -449,16 +449,6 @@ def build_tree_text(
             route_plan=route_plan,
         )
 
-    direct_base_count = sum(
-        1
-        for source in sources
-        if is_base_object(source["ingredient_a"], base_ids=base_ids, base_names=base_names)
-        or is_base_object(source["ingredient_b"], base_ids=base_ids, base_names=base_names)
-    )
-    if direct_base_count:
-        lines.append(f"{prefix}  [提示] 直接接入基础配方：{direct_base_count} 条")
-    else:
-        lines.append(f"{prefix}  [提示] 没有直接接入基础元素的配方")
     if shortest_base_depth_value is not None:
         lines.append(
             f"{prefix}  [提示] 已只显示基础可达最短配方：{len(sources)}/{original_source_count} 条，深度 {shortest_base_depth_value}"
@@ -651,16 +641,6 @@ def build_tree_html_node(
                     remaining_depth=max_depth - current_depth,
                     route_plan=route_plan,
                 )
-            direct_base_count = sum(
-                1
-                for source in sources
-                if is_base_object(source["ingredient_a"], base_ids=base_ids, base_names=base_names)
-                or is_base_object(source["ingredient_b"], base_ids=base_ids, base_names=base_names)
-            )
-            if direct_base_count:
-                notes.append(f"直接接入基础配方：{direct_base_count} 条")
-            else:
-                notes.append("没有直接接入基础元素的配方")
             if shortest_base_depth_value is not None:
                 notes.append(f"已只显示基础可达最短配方：{len(sources)}/{original_source_count} 条，深度 {shortest_base_depth_value}")
             elif shortest_base_only:
