@@ -7,6 +7,7 @@
 ```powershell
 python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
+python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100 --image
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable --refresh-inventory
@@ -24,10 +25,13 @@ python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 2
 - `--refresh-inventory` 才会重新拉取当前账号已发现物品列表。
 - `--refresh-cache` 会忽略本机缓存重新请求，范围最大，通常不用。
 - `--show-id` 会在输出里显示对象 id，排查同名对象时使用。
+- `--image` 会把 HTML 自动全部展开后渲染成完整 PNG；可用 `--image-output` 指定图片路径。
+- `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸，不用于裁剪大图。
 
 输出逻辑：
 
 - 默认写入 `results/时间戳-名称-类型_tree.html`。
+- 加 `--image` 时还会写出同名 `.png`，图片由浏览器 DevTools 捕获完整页面，避免只截当前视口。
 - 会在命令行提示基础路线是否找到、最短深度、配方显示策略。
 - 对不可达对象只输出底层阻塞点，不直接打印整条不可达中间链。
 - 如果存在不可达底层阻塞点，会额外写出 `_blockers.txt` 和 `_blockers.html`；HTML 按真实依赖层级展示阻塞点会影响哪些不可达合成物品，根阻塞点横向排列并支持展开折叠、缩放和平移。
