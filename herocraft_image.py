@@ -3,6 +3,7 @@ from __future__ import annotations
 # 文件职责：把生成后的 HeroCraft HTML 通过 Edge/Chrome DevTools 渲染成完整 PNG。
 
 import base64
+import io
 import json
 import os
 import shutil
@@ -11,6 +12,11 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+
+from PIL import Image
+
+DEVTOOLS_TIMEOUT_SECONDS = 300.0
+SCREENSHOT_TILE_SIZE = 3000
 
 
 def image_output_path(output_path: str) -> str:
@@ -95,7 +101,7 @@ def connect_devtools(websocket_url: str) -> socket.socket:
     host_and_path = websocket_url[len("ws://") :]
     host_port, path = host_and_path.split("/", 1)
     host, raw_port = host_port.rsplit(":", 1)
-    connection = socket.create_connection((host, int(raw_port)), timeout=10)
+    connection = socket.create_connection((host, int(raw_port)), timeout=DEVTOOLS_TIMEOUT_SECONDS)
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
         f"GET /{path} HTTP/1.1\r\n"
@@ -132,6 +138,58 @@ def devtools_call(
             raise RuntimeError(f"{method} 失败：{message['error']}")
         result = message.get("result")
         return result if isinstance(result, dict) else {}
+
+
+def capture_png_tile(
+    connection: socket.socket,
+    message_id: int,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> bytes:
+    screenshot = devtools_call(
+        connection,
+        message_id,
+        "Page.captureScreenshot",
+        {
+            "format": "png",
+            "fromSurface": True,
+            "captureBeyondViewport": True,
+            "clip": {
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "scale": 1,
+            },
+        },
+    )
+    data = screenshot.get("data")
+    if not isinstance(data, str):
+        raise RuntimeError("浏览器没有返回截图数据")
+    return base64.b64decode(data)
+
+
+def save_tiled_screenshot(
+    connection: socket.socket,
+    next_message_id: int,
+    image_path: str,
+    page_width: int,
+    page_height: int,
+) -> int:
+    image = Image.new("RGBA", (page_width, page_height), (255, 255, 255, 255))
+    message_id = next_message_id
+    for y in range(0, page_height, SCREENSHOT_TILE_SIZE):
+        tile_height = min(SCREENSHOT_TILE_SIZE, page_height - y)
+        for x in range(0, page_width, SCREENSHOT_TILE_SIZE):
+            tile_width = min(SCREENSHOT_TILE_SIZE, page_width - x)
+            tile_data = capture_png_tile(connection, message_id, x, y, tile_width, tile_height)
+            message_id += 1
+            with Image.open(io.BytesIO(tile_data)) as tile:
+                image.paste(tile.convert("RGBA"), (x, y))
+    image.save(image_path)
+    return message_id
 
 
 def free_port() -> int:
@@ -239,41 +297,22 @@ def render_html_image(html_path: str, image_path: str, *, width: int, height: in
                 value = metrics_result.get("result", {}).get("value", {})
                 page_width = max(width, int(value.get("width", width))) if isinstance(value, dict) else width
                 page_height = max(height, int(value.get("height", height))) if isinstance(value, dict) else height
+                viewport_width = min(page_width, width, SCREENSHOT_TILE_SIZE)
+                viewport_height = min(page_height, height, SCREENSHOT_TILE_SIZE)
                 devtools_call(
                     connection,
                     message_id,
                     "Emulation.setDeviceMetricsOverride",
                     {
-                        "width": page_width,
-                        "height": page_height,
+                        "width": viewport_width,
+                        "height": viewport_height,
                         "deviceScaleFactor": 1,
                         "mobile": False,
                     },
                 )
                 message_id += 1
                 time.sleep(0.2)
-                screenshot = devtools_call(
-                    connection,
-                    message_id,
-                    "Page.captureScreenshot",
-                    {
-                        "format": "png",
-                        "fromSurface": True,
-                        "captureBeyondViewport": True,
-                        "clip": {
-                            "x": 0,
-                            "y": 0,
-                            "width": page_width,
-                            "height": page_height,
-                            "scale": 1,
-                        },
-                    },
-                )
-                data = screenshot.get("data")
-                if not isinstance(data, str):
-                    raise RuntimeError("浏览器没有返回截图数据")
-                with open(image_path, "wb") as file:
-                    file.write(base64.b64decode(data))
+                save_tiled_screenshot(connection, message_id, image_path, page_width, page_height)
             finally:
                 connection.close()
         finally:
