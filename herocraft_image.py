@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -158,16 +159,28 @@ def wait_for_page_devtools(port: int) -> str:
     raise RuntimeError("等待浏览器页面调试端口超时")
 
 
+def cleanup_browser_profile(path: str) -> None:
+    for _ in range(5):
+        try:
+            shutil.rmtree(path)
+            return
+        except (OSError, PermissionError):
+            time.sleep(0.2)
+
+
 def render_html_image(html_path: str, image_path: str, *, width: int, height: int) -> None:
     browser = find_browser_executable()
     html_url = "file:///" + os.path.abspath(html_path).replace("\\", "/")
     port = free_port()
-    with tempfile.TemporaryDirectory(prefix="herocraft-browser-") as user_data_dir:
+    user_data_dir = tempfile.mkdtemp(prefix="herocraft-browser-")
+    try:
         process = subprocess.Popen(
             [
                 browser,
                 "--headless=new",
                 "--disable-gpu",
+                "--disable-crash-reporter",
+                "--disable-crashpad",
                 "--no-first-run",
                 f"--remote-debugging-port={port}",
                 f"--user-data-dir={user_data_dir}",
@@ -235,3 +248,6 @@ def render_html_image(html_path: str, image_path: str, *, width: int, height: in
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+                process.wait(timeout=5)
+    finally:
+        cleanup_browser_profile(user_data_dir)
