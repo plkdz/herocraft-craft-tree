@@ -73,7 +73,7 @@ def score_unreachable_blockers(
     detail_snapshot: dict[int, ApiObject],
     unreachable_ids: set[int],
     blockers: list[ApiObject],
-) -> list[tuple[ApiObject, int]]:
+) -> list[tuple[ApiObject, list[ApiObject]]]:
     blocker_ids = {require_id(obj) for obj in blockers}
 
     def leaf_blockers_for(object_id: int, visiting: set[int]) -> set[int]:
@@ -92,14 +92,20 @@ def score_unreachable_blockers(
                     result.update(leaf_blockers_for(ingredient_id, visiting | {object_id}))
         return result
 
-    impact_counts = {object_id: 0 for object_id in blocker_ids}
+    affected_by_blocker: dict[int, list[ApiObject]] = {object_id: [] for object_id in blocker_ids}
     for object_id in unreachable_ids:
+        obj = detail_snapshot.get(object_id)
+        if obj is None:
+            continue
         for blocker_id in leaf_blockers_for(object_id, set()):
-            impact_counts[blocker_id] += 1
+            affected_by_blocker[blocker_id].append(obj)
 
     return sorted(
-        ((obj, impact_counts[require_id(obj)]) for obj in blockers),
-        key=lambda item: (-item[1], format_object(item[0]), require_id(item[0])),
+        (
+            (obj, sorted(affected_by_blocker[require_id(obj)], key=lambda affected: require_id(affected)))
+            for obj in blockers
+        ),
+        key=lambda item: (-len(item[1]), format_object(item[0]), require_id(item[0])),
     )
 
 
@@ -138,7 +144,7 @@ def blocker_output_path(output_path: str) -> str:
 
 
 def build_blocker_report(
-    scored_blockers: list[tuple[ApiObject, int]],
+    scored_blockers: list[tuple[ApiObject, list[ApiObject]]],
     *,
     unreachable_count: int,
     show_id: bool,
@@ -150,9 +156,15 @@ def build_blocker_report(
         "",
     ]
     lines.extend(
-        f"{index}. {format_object(obj, show_id=show_id)} | 影响不可达对象 {impact_count} 个"
-        for index, (obj, impact_count) in enumerate(scored_blockers, start=1)
+        f"{index}. {format_object(obj, show_id=show_id)} | 影响不可达对象 {len(affected_objects)} 个"
+        for index, (obj, affected_objects) in enumerate(scored_blockers, start=1)
     )
+    lines.append("")
+    lines.append("影响明细：")
+    for index, (obj, affected_objects) in enumerate(scored_blockers, start=1):
+        lines.append("")
+        lines.append(f"{index}. {format_object(obj, show_id=show_id)} | 影响不可达对象 {len(affected_objects)} 个")
+        lines.extend(f"   - {format_object(affected, show_id=show_id)}" for affected in affected_objects)
     return "\n".join(lines) + "\n"
 
 
@@ -390,7 +402,8 @@ def main() -> None:
                 print("配方显示：全部已知配方", file=sys.stderr)
             if scored_blockers:
                 preview = "，".join(
-                    f"{format_object(obj)}({impact_count})" for obj, impact_count in scored_blockers[:12]
+                    f"{format_object(obj)}({len(affected_objects)})"
+                    for obj, affected_objects in scored_blockers[:12]
                 )
                 suffix = "..." if len(scored_blockers) > 12 else ""
                 print(

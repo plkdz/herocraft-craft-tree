@@ -8,7 +8,7 @@ HeroCraft 合成树查询与 HTML 可视化工具。
 python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
-python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable
+python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable --refresh-inventory
 ```
 
 默认输出 HTML，结果写入 `results/时间戳-名称-类型_tree.html`。HTML 视图支持展开折叠、滚轮缩放、右键拖动平移、重置视角。
