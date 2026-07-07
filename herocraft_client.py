@@ -34,7 +34,6 @@ class ClientConfig:
     request_limit: int
     cache_dir: str
     refresh_cache: bool
-    check_updates: bool
     refresh_inventory: bool
 
 class HeroCraftClient:
@@ -139,7 +138,7 @@ class HeroCraftClient:
     def object_detail(self, object_id: int) -> ApiObject:
         with self._detail_cache_lock:
             cached = self._detail_cache.get(object_id)
-        if cached is not None and not self._config.check_updates:
+        if cached is not None:
             if self._progress is not None:
                 self._progress.cache_hits += 1
                 self._progress.report()
@@ -152,9 +151,6 @@ class HeroCraftClient:
             raise RuntimeError(f"/objects/{object_id} 返回不是对象")
         typed_detail: ApiObject = detail
         with self._detail_cache_lock:
-            cached = self._detail_cache.get(object_id)
-            if cached is not None and not self._config.check_updates:
-                return cached
             self._detail_cache[object_id] = typed_detail
             self._details_since_save += 1
         self.maybe_save_cache()
