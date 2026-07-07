@@ -45,6 +45,7 @@ from herocraft_core import (
     parse_type_filter,
     require_id,
 )
+from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
 from herocraft_tree import BaseRoutePlan, build_base_route_plan, build_html_document, build_tree_text
 
 
@@ -594,6 +595,10 @@ def parse_args() -> argparse.Namespace:
         "--output",
         help=f"输出文件路径；不指定时自动写入 {RESULTS_DIR}/时间戳-物品_tree.*",
     )
+    parser.add_argument("--image", action="store_true", help="把 HTML 全部展开后截图为完整 PNG")
+    parser.add_argument("--image-output", default="", help="PNG 输出路径；默认跟 HTML 同名")
+    parser.add_argument("--image-width", type=int, default=1800, help="截图视口宽度")
+    parser.add_argument("--image-height", type=int, default=1000, help="截图视口高度")
     parser.add_argument(
         "--base-ids",
         default="",
@@ -655,6 +660,10 @@ def main() -> None:
         fail("--branch-workers 必须大于 0")
     if args.deep_workers < 1:
         fail("--deep-workers 必须大于 0")
+    if args.image and args.format != "html":
+        fail("--image 只能和 --format html 一起使用")
+    if args.image_width < 1 or args.image_height < 1:
+        fail("--image-width 和 --image-height 必须大于 0")
     request_limit = int(args.request_limit) if int(args.request_limit) > 0 else int(args.workers)
 
     progress = ProgressStats(start_time=time.time())
@@ -804,6 +813,16 @@ def main() -> None:
                 print("当前深度内基础不可达链条对象：0 个；底层阻塞点：0 个", file=sys.stderr)
             client.save_cache()
             print(f"已写入：{output_path}", file=sys.stderr)
+            if args.image:
+                expanded_html_path = write_expanded_html_for_image(output_path)
+                image_path = str(args.image_output) if args.image_output else image_output_path(output_path)
+                render_html_image(
+                    expanded_html_path,
+                    image_path,
+                    width=int(args.image_width),
+                    height=int(args.image_height),
+                )
+                print(f"已写入图片：{image_path}", file=sys.stderr)
             if blockers_path:
                 print(f"底层阻塞点完整列表：{blockers_path}", file=sys.stderr)
             if blockers_html_path:
