@@ -708,15 +708,16 @@ def build_tree_html_node(
                 "</details>"
             )
 
-    note_html = "".join(f"<div class=\"note\">{html.escape(note)}</div>" for note in notes)
+    note_items = "".join(f"<span class=\"note\">{html.escape(note)}</span>" for note in notes)
+    note_html = f"<span class=\"node-notes\">{note_items}</span>" if note_items else ""
     if recipes:
         return (
             f"<details class=\"tree-node{state_class}\">"
-            f"<summary class=\"object-label\">{label}</summary>"
-            f"{note_html}<div class=\"recipe-row\">{''.join(recipes)}</div>"
+            f"<summary class=\"object-label\"><span class=\"object-title\">{label}</span>{note_html}</summary>"
+            f"<div class=\"recipe-row\">{''.join(recipes)}</div>"
             "</details>"
         )
-    return f"<div class=\"tree-node{state_class}\"><span class=\"object-label\">{label}</span>{note_html}</div>"
+    return f"<div class=\"tree-node{state_class}\"><span class=\"object-label\"><span class=\"object-title\">{label}</span>{note_html}</span></div>"
 
 
 def build_html_document(
@@ -813,17 +814,19 @@ def build_html_document(
     }}
     .tree-root {{
       display: inline-flex;
-      align-items: flex-start;
-      justify-content: center;
+      align-items: center;
+      justify-content: flex-start;
     }}
     details {{ margin: 0; }}
     summary {{ cursor: pointer; line-height: 1.45; }}
     .tree-node {{
       position: relative;
-      display: inline-flex;
-      flex-direction: column;
+      display: inline-grid;
+      grid-template-columns: max-content max-content;
       align-items: center;
-      gap: 10px;
+      justify-items: center;
+      column-gap: 56px;
+      row-gap: 8px;
       min-width: 150px;
       margin: 8px;
       vertical-align: top;
@@ -833,9 +836,13 @@ def build_html_document(
     .tree-node > summary.object-label {{
       position: relative;
       z-index: 2;
+      grid-column: 1;
+      grid-row: 1;
       display: inline-flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       min-height: 34px;
       max-width: 220px;
       padding: 7px 10px;
@@ -847,44 +854,62 @@ def build_html_document(
       white-space: normal;
       overflow-wrap: anywhere;
     }}
+    .object-title {{
+      display: inline;
+    }}
+    .object-label .node-notes {{
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      width: 100%;
+    }}
+    .object-label .note {{
+      margin: 0;
+      color: #697568;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.35;
+      text-align: center;
+    }}
     .recipe-row {{
       position: relative;
       display: flex;
+      flex-direction: column;
       align-items: flex-start;
-      justify-content: center;
+      justify-content: flex-start;
       gap: 18px;
-      padding-top: 56px;
+      grid-column: 2;
+      grid-row: 1 / span 6;
+      padding: 0;
     }}
     .recipe-row::before {{
       content: "";
       position: absolute;
       z-index: 4;
-      top: 0;
-      left: 50%;
-      width: 1px;
-      height: 28px;
+      top: 50%;
+      left: -56px;
+      width: 28px;
+      height: 1px;
       background: #b9c5b3;
     }}
     .recipe-row::after {{
       content: "";
       position: absolute;
       z-index: 4;
-      top: 28px;
-      left: var(--branch-left, 18px);
-      right: var(--branch-right, 18px);
-      height: 1px;
+      top: var(--recipe-top, 50%);
+      bottom: var(--recipe-bottom, 50%);
+      left: -28px;
+      width: 1px;
       background: #b9c5b3;
-    }}
-    .recipe-row:has(> .recipe:only-child)::after {{
-      display: none;
     }}
     .recipe {{
       position: relative;
       z-index: 1;
-      display: inline-flex;
-      flex-direction: column;
+      display: inline-grid;
+      grid-template-columns: max-content max-content;
       align-items: center;
-      min-width: 330px;
+      column-gap: 56px;
+      min-width: 0;
       padding: 0;
       border: 0;
       background: transparent;
@@ -893,10 +918,10 @@ def build_html_document(
       content: "";
       position: absolute;
       z-index: 4;
-      top: -28px;
-      left: 50%;
-      width: 1px;
-      height: 28px;
+      top: 50%;
+      left: -28px;
+      width: 28px;
+      height: 1px;
       background: #b9c5b3;
     }}
     .recipe-label {{
@@ -924,7 +949,9 @@ def build_html_document(
     .base-badge {{
       position: relative;
       z-index: 2;
-      align-self: flex-start;
+      grid-column: 1;
+      align-self: start;
+      justify-self: start;
       margin: 6px 0 0 4px;
       display: inline-flex;
       align-items: center;
@@ -939,46 +966,45 @@ def build_html_document(
     }}
     .ingredient-pair {{
       position: relative;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
       gap: 14px;
-      width: 100%;
-      min-width: 430px;
-      padding-top: 56px;
+      min-width: 240px;
+      padding: 0;
     }}
     .ingredient-pair::before {{
       content: "";
       position: absolute;
       z-index: 4;
-      top: 0;
-      left: 50%;
-      width: 1px;
-      height: 28px;
+      top: 50%;
+      left: -56px;
+      width: 28px;
+      height: 1px;
       background: #b9c5b3;
     }}
     .ingredient-pair::after {{
       content: "";
       position: absolute;
       z-index: 4;
-      top: 28px;
-      left: 25%;
-      right: 25%;
-      height: 1px;
+      top: var(--pair-top, 25%);
+      bottom: var(--pair-bottom, 25%);
+      left: -28px;
+      width: 1px;
       background: #b9c5b3;
     }}
     .ingredient-pair > .tree-node {{
       margin: 0;
       z-index: 1;
-      justify-self: center;
     }}
     .ingredient-pair > .tree-node::before {{
       content: "";
       position: absolute;
       z-index: 4;
-      top: -28px;
-      left: 50%;
-      width: 1px;
-      height: 28px;
+      top: 50%;
+      left: -28px;
+      width: 28px;
+      height: 1px;
       background: #b9c5b3;
     }}
     .recipe-row::before,
@@ -995,25 +1021,6 @@ def build_html_document(
       margin: 4px 0;
       color: #697568;
       font-size: 13px;
-    }}
-    .tree-node > .note {{
-      position: absolute;
-      left: calc(50% + 118px);
-      top: 0;
-      width: 220px;
-      margin: 0;
-      padding: 3px 6px;
-      border-left: 2px solid #d8ded2;
-      background: #ffffffd9;
-      text-align: left;
-      line-height: 1.35;
-      pointer-events: none;
-    }}
-    .tree-node > .note + .note {{
-      top: 28px;
-    }}
-    .tree-node > .note + .note + .note {{
-      top: 56px;
     }}
     .base > .object-label {{ color: #246b45; border-color: #91b79c; background: #f1faf2; }}
     .pruned > .object-label, .pruned-source .recipe-label {{ color: #9a3f2d; border-color: #d7a092; background: #fff7f4; }}
@@ -1112,28 +1119,38 @@ def build_html_document(
       }});
     }}
 
-    function layoutRecipeRows() {{
+    function layoutTreeLines() {{
       document.querySelectorAll(".recipe-row").forEach(row => {{
         const recipes = Array.from(row.children).filter(child => child.classList.contains("recipe"));
-        if (recipes.length < 2 || row.offsetWidth === 0) return;
+        if (recipes.length < 2 || row.offsetHeight === 0) return;
         const first = recipes[0];
         const last = recipes[recipes.length - 1];
-        const left = first.offsetLeft + first.offsetWidth / 2;
-        const right = row.offsetWidth - (last.offsetLeft + last.offsetWidth / 2);
-        row.style.setProperty("--branch-left", `${{left}}px`);
-        row.style.setProperty("--branch-right", `${{right}}px`);
+        const top = first.offsetTop + first.offsetHeight / 2;
+        const bottom = row.offsetHeight - (last.offsetTop + last.offsetHeight / 2);
+        row.style.setProperty("--recipe-top", `${{top}}px`);
+        row.style.setProperty("--recipe-bottom", `${{bottom}}px`);
+      }});
+      document.querySelectorAll(".ingredient-pair").forEach(pair => {{
+        const children = Array.from(pair.children).filter(child => child.classList.contains("tree-node"));
+        if (children.length < 2 || pair.offsetHeight === 0) return;
+        const first = children[0];
+        const last = children[children.length - 1];
+        const top = first.offsetTop + first.offsetHeight / 2;
+        const bottom = pair.offsetHeight - (last.offsetTop + last.offsetHeight / 2);
+        pair.style.setProperty("--pair-top", `${{top}}px`);
+        pair.style.setProperty("--pair-bottom", `${{bottom}}px`);
       }});
     }}
 
     function setAllDetails(open) {{
       document.querySelectorAll("details").forEach(details => details.open = open);
-      requestAnimationFrame(layoutRecipeRows);
+      requestAnimationFrame(layoutTreeLines);
       requestAnimationFrame(resetView);
     }}
 
     document.addEventListener("toggle", event => {{
       if (event.target instanceof HTMLDetailsElement) {{
-        requestAnimationFrame(layoutRecipeRows);
+        requestAnimationFrame(layoutTreeLines);
       }}
     }}, true);
 
@@ -1176,7 +1193,7 @@ def build_html_document(
       const details = target.closest("details.tree-node, details.recipe");
       if (!details || !canvas.contains(details)) return;
       details.open = !details.open;
-      requestAnimationFrame(layoutRecipeRows);
+      requestAnimationFrame(layoutTreeLines);
     }}
 
     viewport.addEventListener("click", event => {{
@@ -1205,7 +1222,7 @@ def build_html_document(
       stopDrag(event);
     }});
     viewport.addEventListener("pointercancel", stopDrag);
-    layoutRecipeRows();
+    layoutTreeLines();
     resetView();
   </script>
 </body>
