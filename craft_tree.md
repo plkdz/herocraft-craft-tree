@@ -17,16 +17,25 @@ python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 2
 
 - 第一个位置参数是对象名称或 id。
 - 第二个位置参数是对象类型，可用 `元素`、`物品`、`装备`、`生物`、`概念`，不写时默认 `生物`。
+- `--cookie` 直接传 `hc_session`；不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session`。
+- `--base-url` 指定 API 基址。
+- `--max-depth` 控制最大展开深度；动态规划会在这个深度内判断能否回到基础元素。
+- `--no-global-dedupe` 关闭全局去重，允许同一对象在不同线路重复展开。
 - `--show-all-sources` 显示全部已知配方；默认只显示基础可达的最短配方。
 - `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发，`--request-limit` 控制 HTTP 总并发闸门。
+- `--branch-workers` 控制单条配方 A/B 两个材料分支并发，最多有效值是 2。
+- `--cache-dir` 指定本机缓存目录。
 - `--base-names` 默认是水、火、土、风；程序会先查真实对象 id，不硬编码 id。
-- `--max-depth` 控制最大展开深度；动态规划会在这个深度内判断能否回到基础元素。
+- `--base-ids` 额外指定作为尽头的基础元素 id，逗号分隔。
 - `--refresh-unreachable` 会先按缓存找不可达链条，再只刷新底层阻塞点并重算，适合外部新增配方后使用。
 - `--refresh-inventory` 才会重新拉取当前账号已发现物品列表。
 - `--refresh-cache` 会忽略本机缓存重新请求，范围最大，通常不用。
 - `--show-id` 会在输出里显示对象 id，排查同名对象时使用。
+- `--format` 指定输出格式，`html` 或 `text`，默认 `html`。
+- `--output` 指定输出文件路径。
 - `--image` 会把 HTML 自动全部展开后渲染成完整 PNG；可用 `--image-output` 指定图片路径。
 - `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸，不用于裁剪大图。
+- `--timeout` 指定单次请求超时秒数。
 
 输出逻辑：
 

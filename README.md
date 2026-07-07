@@ -21,13 +21,31 @@ python sync_cache.py --workers 100 --request-limit 1000
 
 常用参数：
 
-- `--refresh-unreachable`：推荐日常使用。先按缓存找不可达链条，再只刷新底层阻塞点并重算。
-- `--refresh-inventory`：重新拉取当前账号已发现物品列表；刚发现新物品、按名称找不到时再加。
+- `item`：对象名称或对象 id，默认 `天基量子战争元帅`。
+- `item_type`：对象类型，可用 `元素`、`物品`、`装备`、`生物`、`概念`，默认 `生物`。
+- `--cookie`：直接传 `hc_session`；不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session`。
+- `--base-url`：API 基址。
+- `--max-depth`：最大展开深度；动态规划仍会用这个上限判断基础可达路线。
+- `--no-global-dedupe`：关闭全局去重，允许同一对象在不同线路重复展开。
 - `--show-all-sources`：显示全部已知配方；不加时只显示基础可达的最短配方。
 - `--workers`：批量请求对象详情的并发数。
+- `--branch-workers`：单条配方 A/B 分支并发数，最多有效值是 2。
 - `--deep-workers`：递归判定路线时的内部并发数。
 - `--request-limit`：HTTP 总并发上限。
-- `--max-depth`：最大展开深度；动态规划仍会用这个上限判断基础可达路线。
+- `--cache-dir`：本机缓存目录。
+- `--refresh-cache`：忽略本机缓存重新请求，范围最大，通常不用。
+- `--refresh-inventory`：重新拉取当前账号已发现物品列表；刚发现新物品、按名称找不到时再加。
+- `--refresh-unreachable`：推荐日常使用。先按缓存找不可达链条，再只刷新底层阻塞点并重算。
+- `--show-id`：在输出里显示对象 id。
+- `--format`：输出格式，`html` 或 `text`，默认 `html`。
+- `--output`：输出文件路径；不指定时写入 `results/时间戳-名称-类型_tree.*`。
+- `--image`：把 HTML 自动全部展开后渲染成完整 PNG。
+- `--image-output`：PNG 输出路径；默认跟 HTML 同名。
+- `--image-width`：图片渲染初始视口宽度，也是最小输出宽度。
+- `--image-height`：图片渲染初始视口高度，也是最小输出高度。
+- `--base-ids`：额外指定作为尽头的基础元素 id，逗号分隔。
+- `--base-names`：作为尽头的基础元素名称，默认水、火、土、风。
+- `--timeout`：单次请求超时秒数。
 
 源码说明：
 
