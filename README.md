@@ -12,7 +12,7 @@ python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 2
 ```
 
 默认输出 HTML，结果写入 `results/时间戳-名称-类型_tree.html`。HTML 视图支持展开折叠、滚轮缩放、右键拖动平移、重置视角。
-如果存在不可达底层阻塞点，还会额外生成 `_blockers.txt` 完整列表和 `_blockers.html` 树状影响图；影响图按真实依赖层级展示，不是单层列表。
+如果存在不可达底层阻塞点，还会额外生成 `_blockers.txt` 完整列表和 `_blockers.html` 树状影响图；影响图按真实依赖层级展示，不是单层列表，根阻塞点横向排列并支持展开折叠、缩放和平移。
 
 本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。外部配方可能更新时，优先加 `--refresh-unreachable`，它会先按缓存找不可达链条，再只刷新底层阻塞点并重算。需要确认本次全部用到的对象详情时用 `--check-updates`。需要重新拉取已发现物品列表时，再额外加 `--refresh-inventory`。
 

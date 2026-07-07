@@ -182,7 +182,7 @@ def build_blocker_html_report(
     show_id: bool,
 ) -> str:
     title = f"不可达阻塞图 - {format_object(target, show_id=show_id)}"
-    sections: list[str] = []
+    trees: list[str] = []
     for index, (blocker, affected_objects) in enumerate(scored_blockers, start=1):
         affected_by_id = {require_id(obj): obj for obj in affected_objects}
         child_ids_by_parent: dict[int, set[int]] = {}
@@ -218,17 +218,20 @@ def build_blocker_html_report(
             child_html = "".join(
                 render_dependency_node(child, path | {object_id}) for child in children
             )
-            meta = f"<small>影响 {len(affected_objects)} 个不可达对象</small>" if is_root else ""
-            children_block = f"<div class=\"child-row\">{child_html}</div>" if child_html else ""
-            return f"<div class=\"tree-branch\"><div class=\"{node_class}\">{label}{meta}</div>{children_block}</div>"
+            meta = f"<small>#{index} | 影响 {len(affected_objects)} 个不可达对象</small>" if is_root else ""
+            if not child_html:
+                return f"<div class=\"tree-branch\"><div class=\"{node_class}\">{label}{meta}</div></div>"
+            return (
+                "<details class=\"tree-branch\">"
+                f"<summary class=\"{node_class}\">{label}{meta}</summary>"
+                f"<div class=\"child-row\">{child_html}</div>"
+                "</details>"
+            )
 
-        sections.append(
-            "<section class=\"blocker-tree\">"
-            f"<div class=\"tree-title\">#{index}</div>"
-            f"{render_dependency_node(blocker, set(), is_root=True)}"
-            "</section>"
+        trees.append(
+            render_dependency_node(blocker, set(), is_root=True)
         )
-    body = "\n".join(sections)
+    body = "\n".join(trees)
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -251,18 +254,54 @@ def build_blocker_html_report(
       color: #647063;
       font-size: 14px;
     }}
-    .blocker-tree {{
-      position: relative;
-      width: max-content;
-      min-width: 100%;
-      margin: 18px 0 34px;
-      padding-top: 4px;
-      text-align: center;
+    .toolbar {{
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 0 0 12px;
+      flex-wrap: wrap;
     }}
-    .tree-title {{
-      margin-bottom: 8px;
+    button {{
+      min-height: 34px;
+      padding: 6px 10px;
+      border: 1px solid #c7d0c0;
+      border-radius: 6px;
+      background: #fff;
+      color: #1f2933;
+      cursor: pointer;
+    }}
+    .zoom-indicator {{
       color: #647063;
-      font-weight: 700;
+      font-size: 13px;
+    }}
+    .tree-viewport {{
+      width: calc(100vw - 48px);
+      height: calc(100vh - 138px);
+      overflow: hidden;
+      border: 1px solid #d8ded2;
+      border-radius: 8px;
+      background: #fff;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }}
+    .tree-viewport.dragging {{
+      cursor: grabbing;
+    }}
+    .tree-canvas {{
+      transform-origin: 0 0;
+      display: inline-block;
+      min-width: max-content;
+      padding: 28px;
+    }}
+    .forest {{
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      gap: 28px;
+      width: max-content;
+      text-align: center;
     }}
     .tree-branch {{
       position: relative;
@@ -270,6 +309,16 @@ def build_blocker_html_report(
       flex-direction: column;
       align-items: center;
       vertical-align: top;
+    }}
+    details.tree-branch {{
+      margin: 0;
+    }}
+    summary.tree-node {{
+      cursor: pointer;
+      list-style: none;
+    }}
+    summary.tree-node::-webkit-details-marker {{
+      display: none;
     }}
     .tree-node {{
       position: relative;
@@ -360,12 +409,119 @@ def build_blocker_html_report(
       height: 28px;
       background: #b9c5b3;
     }}
+    .child-row::before,
+    .child-row::after,
+    .child-row > .tree-branch::before {{
+      pointer-events: none;
+    }}
   </style>
 </head>
 <body>
   <h1>{html.escape(title)}</h1>
   <p class="meta">基础不可达链条对象：{unreachable_count} 个；底层阻塞点：{len(scored_blockers)} 个。排序规则：影响不可达对象越多越靠前。</p>
-  {body}
+  <div class="toolbar">
+    <button onclick="setAllDetails(true)">全部展开</button>
+    <button onclick="setAllDetails(false)">全部折叠</button>
+    <button onclick="zoomBy(1.2)">放大</button>
+    <button onclick="zoomBy(1 / 1.2)">缩小</button>
+    <button onclick="resetView()">重置视图</button>
+    <span class="zoom-indicator" id="zoomIndicator">100%</span>
+  </div>
+  <div class="tree-viewport" id="viewport">
+    <main class="tree-canvas" id="treeCanvas"><div class="forest">{body}</div></main>
+  </div>
+  <script>
+    const viewport = document.getElementById("viewport");
+    const canvas = document.getElementById("treeCanvas");
+    const zoomIndicator = document.getElementById("zoomIndicator");
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let dragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let originX = 0;
+    let originY = 0;
+
+    function clampScale(value) {{
+      return Math.min(3, Math.max(0.12, value));
+    }}
+
+    function applyTransform() {{
+      canvas.style.transform = `translate(${{translateX}}px, ${{translateY}}px) scale(${{scale}})`;
+      zoomIndicator.textContent = `${{Math.round(scale * 100)}}%`;
+    }}
+
+    function zoomAt(factor, clientX, clientY) {{
+      const rect = viewport.getBoundingClientRect();
+      const oldScale = scale;
+      const nextScale = clampScale(scale * factor);
+      const viewportX = clientX - rect.left;
+      const viewportY = clientY - rect.top;
+      const worldX = (viewportX - translateX) / oldScale;
+      const worldY = (viewportY - translateY) / oldScale;
+      scale = nextScale;
+      translateX = viewportX - worldX * scale;
+      translateY = viewportY - worldY * scale;
+      applyTransform();
+    }}
+
+    function zoomBy(factor) {{
+      const rect = viewport.getBoundingClientRect();
+      zoomAt(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }}
+
+    function resetView() {{
+      scale = 1;
+      translateX = 0;
+      translateY = 0;
+      applyTransform();
+    }}
+
+    function setAllDetails(open) {{
+      document.querySelectorAll("details").forEach(details => details.open = open);
+    }}
+
+    viewport.addEventListener("wheel", event => {{
+      event.preventDefault();
+      zoomAt(event.deltaY < 0 ? 1.12 : 1 / 1.12, event.clientX, event.clientY);
+    }}, {{ passive: false }});
+
+    viewport.addEventListener("contextmenu", event => {{
+      event.preventDefault();
+    }});
+
+    viewport.addEventListener("pointerdown", event => {{
+      if (event.button !== 2) return;
+      event.preventDefault();
+      dragging = true;
+      viewport.classList.add("dragging");
+      viewport.setPointerCapture(event.pointerId);
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      originX = translateX;
+      originY = translateY;
+    }});
+
+    viewport.addEventListener("pointermove", event => {{
+      if (!dragging) return;
+      translateX = originX + event.clientX - dragStartX;
+      translateY = originY + event.clientY - dragStartY;
+      applyTransform();
+    }});
+
+    function stopDrag(event) {{
+      dragging = false;
+      viewport.classList.remove("dragging");
+      if (event.pointerId !== undefined) {{
+        try {{ viewport.releasePointerCapture(event.pointerId); }} catch {{}}
+      }}
+    }}
+
+    viewport.addEventListener("pointerup", stopDrag);
+    viewport.addEventListener("pointercancel", stopDrag);
+    applyTransform();
+  </script>
 </body>
 </html>
 """
