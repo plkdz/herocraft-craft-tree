@@ -13,6 +13,7 @@ from __future__ import annotations
 # --branch-workers：单条配方 A/B 两个材料分支的并发数，最多有效值是 2。
 
 import argparse
+import concurrent.futures
 import os
 import sys
 import time
@@ -43,7 +44,7 @@ from herocraft_core import (
     parse_type_filter,
     require_id,
 )
-from herocraft_tree import build_base_route_plan, build_html_document, build_tree_text
+from herocraft_tree import BaseRoutePlan, build_base_route_plan, build_html_document, build_tree_text
 
 
 def collect_unreachable_leaf_blockers(
@@ -100,6 +101,35 @@ def score_unreachable_blockers(
         ((obj, impact_counts[require_id(obj)]) for obj in blockers),
         key=lambda item: (-item[1], format_object(item[0]), require_id(item[0])),
     )
+
+
+def collect_unreachable_ids(
+    route_plan: BaseRoutePlan,
+    detail_snapshot: dict[int, ApiObject],
+    *,
+    base_ids: set[int],
+    base_names: set[str],
+) -> set[int]:
+    return {
+        object_id
+        for object_id in route_plan.object_ids
+        if object_id not in route_plan.depths
+        and object_id in detail_snapshot
+        and not is_base_object(detail_snapshot[object_id], base_ids=base_ids, base_names=base_names)
+    }
+
+
+def refresh_object_details(client: HeroCraftClient, object_ids: set[int]) -> None:
+    ordered_ids = sorted(object_ids)
+    if not ordered_ids:
+        return
+    if client.max_workers <= 1 or len(ordered_ids) <= 1:
+        for object_id in ordered_ids:
+            client.refresh_object_detail(object_id)
+        return
+    worker_count = min(client.max_workers, len(ordered_ids))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        list(executor.map(client.refresh_object_detail, ordered_ids))
 
 
 def blocker_output_path(output_path: str) -> str:
@@ -165,6 +195,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--refresh-cache", action="store_true", help="忽略本机缓存并重新请求")
     parser.add_argument("--check-updates", action="store_true", help="使用缓存前向服务器确认本次用到的对象详情")
     parser.add_argument("--refresh-inventory", action="store_true", help="重新拉取当前账号已发现物品列表")
+    parser.add_argument("--refresh-unreachable", action="store_true", help="先按缓存找不可达链条，再只刷新底层阻塞点并重算")
     parser.add_argument("--show-id", action="store_true", help="在输出里显示对象 id")
     parser.add_argument(
         "--format",
@@ -275,6 +306,33 @@ def main() -> None:
             base_ids=base_ids,
             base_names=base_names,
         )
+        detail_snapshot = client.detail_cache_snapshot()
+        unreachable_ids = collect_unreachable_ids(
+            route_plan,
+            detail_snapshot,
+            base_ids=base_ids,
+            base_names=base_names,
+        )
+        unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
+        if args.refresh_unreachable and unreachable_blockers:
+            blocker_ids = {require_id(obj) for obj in unreachable_blockers}
+            print(f"刷新不可达底层阻塞点详情：{len(blocker_ids)} 个", file=sys.stderr)
+            refresh_object_details(client, blocker_ids)
+            route_plan = build_base_route_plan(
+                client,
+                target,
+                max_depth=int(args.max_depth),
+                base_ids=base_ids,
+                base_names=base_names,
+            )
+            detail_snapshot = client.detail_cache_snapshot()
+            unreachable_ids = collect_unreachable_ids(
+                route_plan,
+                detail_snapshot,
+                base_ids=base_ids,
+                base_names=base_names,
+            )
+            unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
         if output_format == "html":
             content = build_html_document(
                 client,
@@ -305,15 +363,6 @@ def main() -> None:
             content = "\n".join(lines) + "\n"
 
         base_route_depth = route_plan.depths.get(require_id(target))
-        detail_snapshot = client.detail_cache_snapshot()
-        unreachable_ids = {
-            object_id
-            for object_id in route_plan.object_ids
-            if object_id not in route_plan.depths
-            and object_id in detail_snapshot
-            and not is_base_object(detail_snapshot[object_id], base_ids=base_ids, base_names=base_names)
-        }
-        unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
         scored_blockers = score_unreachable_blockers(detail_snapshot, unreachable_ids, unreachable_blockers)
         output_path = str(args.output) if args.output else default_output_path(target, output_format)
         if output_path:

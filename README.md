@@ -9,11 +9,12 @@ python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-worke
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --check-updates
+python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
 ```
 
 默认输出 HTML，结果写入 `results/时间戳-名称-类型_tree.html`。HTML 视图支持展开折叠、滚轮缩放、右键拖动平移、重置视角。
 
-本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。外部配方可能更新时，加 `--check-updates` 自动向服务器确认本次用到的对象详情；它不会同步全部物品。需要重新拉取已发现物品列表时，再额外加 `--refresh-inventory`。
+本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。外部配方可能更新时，优先加 `--refresh-unreachable`，它会先按缓存找不可达链条，再只刷新底层阻塞点并重算。需要确认本次全部用到的对象详情时用 `--check-updates`。需要重新拉取已发现物品列表时，再额外加 `--refresh-inventory`。
 
 源码说明：
 

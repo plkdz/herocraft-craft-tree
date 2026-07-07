@@ -18,6 +18,7 @@ python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 2
 - `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发，`--request-limit` 控制 HTTP 总并发闸门。
 - `--base-names` 默认是水、火、土、风；程序会先查真实对象 id，不硬编码 id。
 - `--check-updates` 会在使用缓存前向服务器确认本次用到的对象详情，不会同步全部物品。
+- `--refresh-unreachable` 会先按缓存找不可达链条，再只刷新底层阻塞点并重算，适合外部新增配方后使用。
 - `--refresh-inventory` 才会重新拉取当前账号已发现物品列表。
 
 输出逻辑：

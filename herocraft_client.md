@@ -17,6 +17,7 @@
 
 - `request_json()`：带 Cookie 发 GET 请求并解析 JSON。
 - `object_detail()`：按 id 获取对象详情，优先读本机缓存。
+- `refresh_object_detail()`：按 id 强制重拉对象详情并写回缓存。
 - `detail_cache_snapshot()`：复制一份当前详情缓存，供动态规划和不可达统计使用。
 - `my_objects()`：分页获取当前账号已发现对象。
 - `resolve_object()`：按名称或 id 定位对象，支持类型筛选和同名提示。

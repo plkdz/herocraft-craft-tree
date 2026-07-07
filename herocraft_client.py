@@ -160,6 +160,19 @@ class HeroCraftClient:
         self.maybe_save_cache()
         return typed_detail
 
+    def refresh_object_detail(self, object_id: int) -> ApiObject:
+        if self._progress is not None:
+            self._progress.detail_requests += 1
+            self._progress.report()
+        detail = self.request_json(f"/objects/{object_id}")
+        if not isinstance(detail, dict):
+            raise RuntimeError(f"/objects/{object_id} 返回不是对象")
+        typed_detail: ApiObject = detail
+        with self._detail_cache_lock:
+            self._detail_cache[object_id] = typed_detail
+            self._details_since_save += 1
+        return typed_detail
+
     def detail_cache_snapshot(self) -> dict[int, ApiObject]:
         with self._detail_cache_lock:
             return dict(self._detail_cache)
