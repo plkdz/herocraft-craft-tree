@@ -7,14 +7,24 @@ HeroCraft 合成树查询与 HTML 可视化工具。
 ```powershell
 python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
-python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources
-python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --check-updates
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
+python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable
 ```
 
 默认输出 HTML，结果写入 `results/时间戳-名称-类型_tree.html`。HTML 视图支持展开折叠、滚轮缩放、右键拖动平移、重置视角。
 
 本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。外部配方可能更新时，优先加 `--refresh-unreachable`，它会先按缓存找不可达链条，再只刷新底层阻塞点并重算。需要确认本次全部用到的对象详情时用 `--check-updates`。需要重新拉取已发现物品列表时，再额外加 `--refresh-inventory`。
+
+常用参数：
+
+- `--refresh-unreachable`：推荐日常使用。先按缓存找不可达链条，再只刷新底层阻塞点并重算。
+- `--check-updates`：确认本次用到的全部对象详情，范围比 `--refresh-unreachable` 大。
+- `--refresh-inventory`：重新拉取当前账号已发现物品列表；刚发现新物品、按名称找不到时再加。
+- `--show-all-sources`：显示全部已知配方；不加时只显示基础可达的最短配方。
+- `--workers`：批量请求对象详情的并发数。
+- `--deep-workers`：递归判定路线时的内部并发数。
+- `--request-limit`：HTTP 总并发上限。
+- `--max-depth`：最大展开深度；动态规划仍会用这个上限判断基础可达路线。
 
 源码说明：
 
