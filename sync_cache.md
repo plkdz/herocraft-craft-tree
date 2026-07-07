@@ -5,7 +5,7 @@
 常用命令：
 
 ```powershell
-python sync_cache.py --workers 20 --request-limit 100
+python sync_cache.py --workers 100 --request-limit 1000
 ```
 
 同步逻辑：

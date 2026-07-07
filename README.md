@@ -9,10 +9,10 @@ python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-worke
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable --refresh-inventory
-python sync_cache.py --workers 20 --request-limit 100
+python sync_cache.py --workers 100 --request-limit 1000
 ```
 
-默认输出 HTML，结果写入 `results/时间戳-名称-类型_tree.html`。HTML 视图支持展开折叠、滚轮缩放、右键拖动平移、重置视角。
+默认输出 HTML，结果写入 `results/时间戳-名称-类型_tree.html`。HTML 视图默认居中到根节点，支持展开折叠、滚轮缩放、右键拖动平移、重置视角；全部展开和全部折叠后也会重新居中。
 如果存在不可达底层阻塞点，还会额外生成 `_blockers.txt` 完整列表和 `_blockers.html` 树状影响图；影响图按真实依赖层级展示，不是单层列表，根阻塞点横向排列并支持展开折叠、缩放和平移。
 
 本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。外部配方可能更新时，优先用 `sync_cache.py` 全量同步缓存：它会重新拉取已发现物品列表，并对去重后的每个对象 id 请求一次详情。只想针对当前目标修不可达链条时，用 `--refresh-unreachable` 刷新底层阻塞点并重算。刚发现新物品、按名称找不到时，再给合成树命令额外加 `--refresh-inventory`。
