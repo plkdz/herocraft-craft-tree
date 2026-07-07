@@ -17,6 +17,8 @@ python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 2
 - `--show-all-sources` 显示全部已知配方；默认只显示基础可达的最短配方。
 - `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发，`--request-limit` 控制 HTTP 总并发闸门。
 - `--base-names` 默认是水、火、土、风；程序会先查真实对象 id，不硬编码 id。
+- `--check-updates` 会在使用缓存前向服务器确认本次用到的对象详情，不会同步全部物品。
+- `--refresh-inventory` 才会重新拉取当前账号已发现物品列表。
 
 输出逻辑：
 

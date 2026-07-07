@@ -34,6 +34,8 @@ class ClientConfig:
     request_limit: int
     cache_dir: str
     refresh_cache: bool
+    check_updates: bool
+    refresh_inventory: bool
 
 class HeroCraftClient:
     def __init__(self, config: ClientConfig, progress: ProgressStats | None = None) -> None:
@@ -82,7 +84,7 @@ class HeroCraftClient:
         return result
 
     def _load_inventory_cache(self) -> list[ApiObject] | None:
-        if self._config.refresh_cache:
+        if self._config.refresh_cache or self._config.refresh_inventory:
             return None
         path = self._cache_path(INVENTORY_CACHE_FILE)
         if not os.path.exists(path):
@@ -137,7 +139,7 @@ class HeroCraftClient:
     def object_detail(self, object_id: int) -> ApiObject:
         with self._detail_cache_lock:
             cached = self._detail_cache.get(object_id)
-        if cached is not None:
+        if cached is not None and not self._config.check_updates:
             if self._progress is not None:
                 self._progress.cache_hits += 1
                 self._progress.report()
@@ -151,7 +153,7 @@ class HeroCraftClient:
         typed_detail: ApiObject = detail
         with self._detail_cache_lock:
             cached = self._detail_cache.get(object_id)
-            if cached is not None:
+            if cached is not None and not self._config.check_updates:
                 return cached
             self._detail_cache[object_id] = typed_detail
             self._details_since_save += 1

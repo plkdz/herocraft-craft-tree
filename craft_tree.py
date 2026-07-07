@@ -163,6 +163,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--request-limit", type=int, default=0, help="同时 HTTP 请求上限；默认等于 --workers")
     parser.add_argument("--cache-dir", default=CACHE_DIR, help="本机缓存目录")
     parser.add_argument("--refresh-cache", action="store_true", help="忽略本机缓存并重新请求")
+    parser.add_argument("--check-updates", action="store_true", help="使用缓存前向服务器确认本次用到的对象详情")
+    parser.add_argument("--refresh-inventory", action="store_true", help="重新拉取当前账号已发现物品列表")
     parser.add_argument("--show-id", action="store_true", help="在输出里显示对象 id")
     parser.add_argument(
         "--format",
@@ -249,6 +251,8 @@ def main() -> None:
             request_limit=request_limit,
             cache_dir=str(args.cache_dir),
             refresh_cache=bool(args.refresh_cache),
+            check_updates=bool(args.check_updates),
+            refresh_inventory=bool(args.refresh_inventory),
         ),
         progress=progress,
     )
