@@ -1,0 +1,32 @@
+# craft_tree.py
+
+文件职责：命令行入口，负责解析参数、初始化客户端、调度合成树生成并写出结果文件。
+
+常用命令：
+
+```powershell
+python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
+python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
+python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources
+```
+
+参数要点：
+
+- 第一个位置参数是对象名称或 id。
+- 第二个位置参数是对象类型，可用 `元素`、`物品`、`装备`、`生物`、`概念`，不写时默认 `生物`。
+- `--show-all-sources` 显示全部已知配方；默认只显示基础可达的最短配方。
+- `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发，`--request-limit` 控制 HTTP 总并发闸门。
+- `--base-names` 默认是水、火、土、风；程序会先查真实对象 id，不硬编码 id。
+
+输出逻辑：
+
+- 默认写入 `results/时间戳-名称-类型_tree.html`。
+- 会在命令行提示基础路线是否找到、最短深度、配方显示策略。
+- 对不可达对象只输出底层阻塞点，不直接打印整条不可达中间链。
+
+关键函数：
+
+- `parse_args()`：定义命令行参数。
+- `resolve_base_elements()`：把基础元素名称解析成真实对象。
+- `collect_unreachable_leaf_blockers()`：从不可达链条中筛出最底层阻塞对象。
+- `main()`：串联解析、查询、动态规划、渲染、保存缓存与结果文件。
