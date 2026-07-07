@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 文件职责：封装 HeroCraft HTTP API、本机明文缓存、请求并发闸门和对象解析。
+
 import json
 import os
 import socket
@@ -155,6 +157,10 @@ class HeroCraftClient:
             self._details_since_save += 1
         self.maybe_save_cache()
         return typed_detail
+
+    def detail_cache_snapshot(self) -> dict[int, ApiObject]:
+        with self._detail_cache_lock:
+            return dict(self._detail_cache)
 
     def my_objects(self) -> list[ApiObject]:
         if self._mine_cache is not None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+# 文件职责：命令行入口，负责解析参数、初始化客户端、调度合成树生成并写出结果文件。
+#
 # 常用命令：
-# python craft_tree.py 太空电梯 --type 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
-# python craft_tree.py 蒸汽 --type 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
+# python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
+# python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
 #
 # 并发参数：
 # --workers：外层并发；同一个物品有多条候选配方时，同时检查多条配方。
@@ -33,13 +35,38 @@ from herocraft_core import (
     default_output_path,
     fail,
     format_object,
+    is_base_object,
+    iter_sources,
     load_session_from_file,
     parse_int_set,
     parse_name_set,
     parse_type_filter,
     require_id,
 )
-from herocraft_tree import build_html_document, build_tree_text, object_base_depth
+from herocraft_tree import build_base_route_plan, build_html_document, build_tree_text
+
+
+def collect_unreachable_leaf_blockers(
+    detail_snapshot: dict[int, ApiObject],
+    unreachable_ids: set[int],
+) -> list[ApiObject]:
+    blockers: list[ApiObject] = []
+    for object_id in sorted(unreachable_ids):
+        obj = detail_snapshot.get(object_id)
+        if obj is None:
+            continue
+        has_deeper_unreachable = False
+        for source in iter_sources(obj):
+            for ingredient in (source["ingredient_a"], source["ingredient_b"]):
+                if require_id(ingredient) in unreachable_ids:
+                    has_deeper_unreachable = True
+                    break
+            if has_deeper_unreachable:
+                break
+        if not has_deeper_unreachable:
+            blockers.append(obj)
+    return blockers
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="查询 HeroCraft 已发现物品的完整合成树")
@@ -50,9 +77,10 @@ def parse_args() -> argparse.Namespace:
         help=f"物品名称或物品 id；默认：{DEFAULT_ITEM}",
     )
     parser.add_argument(
-        "--type",
-        default=DEFAULT_TYPE,
-        help="按类型筛选同名对象：元素、物品、装备、生物、概念",
+        "item_type",
+        nargs="?",
+        default="",
+        help=f"对象类型：元素、物品、装备、生物、概念；默认：{DEFAULT_TYPE}",
     )
     parser.add_argument(
         "--cookie",
@@ -173,10 +201,18 @@ def main() -> None:
             base_ids=parse_int_set(str(args.base_ids)),
             base_names=parse_name_set(str(args.base_names)),
         )
-        target = client.resolve_object(str(args.item), parse_type_filter(str(args.type)))
+        target_type = str(args.item_type or DEFAULT_TYPE)
+        target = client.resolve_object(str(args.item), parse_type_filter(target_type))
         output_format: OutputFormat = args.format
         base_depth_cache: BaseDepthCache = {}
         shortest_base_only = not bool(args.show_all_sources)
+        route_plan = build_base_route_plan(
+            client,
+            target,
+            max_depth=int(args.max_depth),
+            base_ids=base_ids,
+            base_names=base_names,
+        )
         if output_format == "html":
             content = build_html_document(
                 client,
@@ -188,6 +224,7 @@ def main() -> None:
                 global_dedupe=not bool(args.no_global_dedupe),
                 shortest_base_only=shortest_base_only,
                 base_depth_cache=base_depth_cache,
+                route_plan=route_plan,
             )
         else:
             lines = build_tree_text(
@@ -200,19 +237,21 @@ def main() -> None:
                 global_dedupe=not bool(args.no_global_dedupe),
                 shortest_base_only=shortest_base_only,
                 base_depth_cache=base_depth_cache,
+                route_plan=route_plan,
                 expanded_ids=set(),
             )
             content = "\n".join(lines) + "\n"
 
-        base_route_depth = object_base_depth(
-            client,
-            target,
-            base_ids=base_ids,
-            base_names=base_names,
-            cache=base_depth_cache,
-            visiting=set(),
-            remaining_depth=int(args.max_depth),
-        )
+        base_route_depth = route_plan.depths.get(require_id(target))
+        detail_snapshot = client.detail_cache_snapshot()
+        unreachable_ids = {
+            object_id
+            for object_id in route_plan.object_ids
+            if object_id not in route_plan.depths
+            and object_id in detail_snapshot
+            and not is_base_object(detail_snapshot[object_id], base_ids=base_ids, base_names=base_names)
+        }
+        unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
         output_path = str(args.output) if args.output else default_output_path(target, output_format)
         if output_path:
             with open(output_path, "w", encoding="utf-8") as file:
@@ -226,6 +265,20 @@ def main() -> None:
                 print("配方显示：只显示基础可达的最短配方；如需全部配方，加 --show-all-sources", file=sys.stderr)
             else:
                 print("配方显示：全部已知配方", file=sys.stderr)
+            if unreachable_blockers:
+                preview = "，".join(format_object(obj) for obj in unreachable_blockers[:12])
+                suffix = "..." if len(unreachable_blockers) > 12 else ""
+                print(
+                    f"当前深度内基础不可达链条对象：{len(unreachable_ids)} 个；底层阻塞点：{len(unreachable_blockers)} 个。示例：{preview}{suffix}",
+                    file=sys.stderr,
+                )
+            elif unreachable_ids:
+                print(
+                    f"当前深度内基础不可达链条对象：{len(unreachable_ids)} 个；未找到无下游依赖的底层阻塞点，可能主要是循环依赖",
+                    file=sys.stderr,
+                )
+            else:
+                print("当前深度内基础不可达链条对象：0 个；底层阻塞点：0 个", file=sys.stderr)
             client.save_cache()
             print(f"已写入：{output_path}", file=sys.stderr)
     except RuntimeError as exc:

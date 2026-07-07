@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+# 文件职责：构建合成路线计划，筛选基础可达最短配方，并渲染 text/html 合成树。
+
 import concurrent.futures
 import html
+from dataclasses import dataclass
 
 from herocraft_client import HeroCraftClient
 from herocraft_core import (
@@ -14,6 +17,152 @@ from herocraft_core import (
     iter_sources,
     require_id,
 )
+
+
+@dataclass(frozen=True)
+class BaseRoutePlan:
+    depths: dict[int, int]
+    object_ids: set[int]
+
+
+def source_depth_from_plan(
+    source: CraftSource,
+    *,
+    base_ids: set[int],
+    base_names: set[str],
+    route_plan: BaseRoutePlan,
+) -> int | None:
+    ingredient_depths: list[int] = []
+    for ingredient in (source["ingredient_a"], source["ingredient_b"]):
+        if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
+            ingredient_depths.append(0)
+            continue
+        depth = route_plan.depths.get(require_id(ingredient))
+        if depth is None:
+            return None
+        ingredient_depths.append(depth)
+    return 1 + max(ingredient_depths)
+
+
+def source_depth_from_depths(
+    source: CraftSource,
+    *,
+    base_ids: set[int],
+    base_names: set[str],
+    depths: dict[int, int],
+) -> int | None:
+    ingredient_depths: list[int] = []
+    for ingredient in (source["ingredient_a"], source["ingredient_b"]):
+        if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
+            ingredient_depths.append(0)
+            continue
+        depth = depths.get(require_id(ingredient))
+        if depth is None:
+            return None
+        ingredient_depths.append(depth)
+    return 1 + max(ingredient_depths)
+
+
+def build_base_route_plan(
+    client: HeroCraftClient,
+    target: ApiObject,
+    *,
+    max_depth: int,
+    base_ids: set[int],
+    base_names: set[str],
+) -> BaseRoutePlan:
+    if client._progress is not None:
+        client._progress.phase = "批量补全配方图"
+        client._progress.report()
+
+    target_id = require_id(target)
+    frontier: dict[int, int] = {target_id: max_depth}
+    seen_remaining: dict[int, int] = {}
+
+    while frontier:
+        object_ids = list(frontier)
+        if client.max_workers <= 1 or len(object_ids) <= 1:
+            for object_id in object_ids:
+                client.object_detail(object_id)
+        else:
+            worker_count = min(client.max_workers, len(object_ids))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+                list(executor.map(client.object_detail, object_ids))
+
+        details = client.detail_cache_snapshot()
+        route_plan = BaseRoutePlan(
+            compute_base_depths(details, max_depth=max_depth, base_ids=base_ids, base_names=base_names),
+            set(seen_remaining) | set(frontier),
+        )
+        if target_id in route_plan.depths:
+            return route_plan
+
+        next_frontier: dict[int, int] = {}
+        for object_id, remaining_depth in frontier.items():
+            previous_remaining = seen_remaining.get(object_id, -1)
+            if remaining_depth <= previous_remaining:
+                continue
+            seen_remaining[object_id] = remaining_depth
+            if remaining_depth <= 0:
+                continue
+
+            detail = details.get(object_id)
+            if detail is None:
+                continue
+            for source in iter_sources(detail):
+                for ingredient in (source["ingredient_a"], source["ingredient_b"]):
+                    if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
+                        continue
+                    ingredient_id = require_id(ingredient)
+                    next_remaining = remaining_depth - 1
+                    if next_remaining > seen_remaining.get(ingredient_id, -1):
+                        next_frontier[ingredient_id] = max(next_frontier.get(ingredient_id, -1), next_remaining)
+        frontier = next_frontier
+
+    if client._progress is not None:
+        client._progress.phase = "动态规划最短路线"
+        client._progress.report()
+
+    details = client.detail_cache_snapshot()
+    return BaseRoutePlan(
+        compute_base_depths(details, max_depth=max_depth, base_ids=base_ids, base_names=base_names),
+        set(seen_remaining),
+    )
+
+
+def compute_base_depths(
+    details: dict[int, ApiObject],
+    *,
+    max_depth: int,
+    base_ids: set[int],
+    base_names: set[str],
+) -> dict[int, int]:
+    depths: dict[int, int] = {object_id: 0 for object_id in base_ids}
+    for _ in range(max_depth):
+        previous_depths = dict(depths)
+        next_depths = dict(depths)
+        changed = False
+        for object_id, detail in details.items():
+            best_depth = previous_depths.get(object_id)
+            for source in iter_sources(detail):
+                source_depth = source_depth_from_depths(
+                    source,
+                    base_ids=base_ids,
+                    base_names=base_names,
+                    depths=previous_depths,
+                )
+                if source_depth is None:
+                    continue
+                if best_depth is None or source_depth < best_depth:
+                    best_depth = source_depth
+            if best_depth is not None and best_depth != previous_depths.get(object_id):
+                next_depths[object_id] = best_depth
+                changed = True
+        depths = next_depths
+        if not changed:
+            break
+    return depths
+
 
 def source_base_depth(
     client: HeroCraftClient,
@@ -151,6 +300,7 @@ def filter_shortest_base_sources(
     base_names: set[str],
     cache: BaseDepthCache,
     remaining_depth: int,
+    route_plan: BaseRoutePlan | None = None,
 ) -> tuple[list[CraftSource], int | None, int]:
     if client._progress is not None:
         client._progress.phase = "筛选最短基础路线"
@@ -166,18 +316,29 @@ def filter_shortest_base_sources(
         return direct_base_sources, 1, len(direct_base_sources)
 
     source_depths: list[tuple[CraftSource, int]] = []
-    results = collect_source_depths(
-        client,
-        sources,
-        base_ids=base_ids,
-        base_names=base_names,
-        cache=cache,
-        visiting=set(),
-        remaining_depth=remaining_depth,
-    )
-    for source, depth in results:
-        if depth is not None:
-            source_depths.append((source, depth))
+    if route_plan is not None:
+        for source in sources:
+            depth = source_depth_from_plan(
+                source,
+                base_ids=base_ids,
+                base_names=base_names,
+                route_plan=route_plan,
+            )
+            if depth is not None:
+                source_depths.append((source, depth))
+    else:
+        results = collect_source_depths(
+            client,
+            sources,
+            base_ids=base_ids,
+            base_names=base_names,
+            cache=cache,
+            visiting=set(),
+            remaining_depth=remaining_depth,
+        )
+        for source, depth in results:
+            if depth is not None:
+                source_depths.append((source, depth))
 
     if not source_depths:
         return sources, None, 0
@@ -227,6 +388,7 @@ def build_tree_text(
     global_dedupe: bool,
     shortest_base_only: bool,
     base_depth_cache: BaseDepthCache,
+    route_plan: BaseRoutePlan | None,
     expanded_ids: set[int],
     current_depth: int = 0,
     path: tuple[int, ...] = (),
@@ -284,6 +446,7 @@ def build_tree_text(
             base_names=base_names,
             cache=base_depth_cache,
             remaining_depth=max_depth - current_depth,
+            route_plan=route_plan,
         )
 
     direct_base_count = sum(
@@ -348,6 +511,7 @@ def build_tree_text(
                 global_dedupe=global_dedupe,
                 shortest_base_only=shortest_base_only,
                 base_depth_cache=base_depth_cache,
+                route_plan=route_plan,
                 expanded_ids=expanded_ids,
                 current_depth=current_depth + 1,
                 path=next_path,
@@ -366,6 +530,7 @@ def build_tree_text(
                 global_dedupe=global_dedupe,
                 shortest_base_only=shortest_base_only,
                 base_depth_cache=base_depth_cache,
+                route_plan=route_plan,
                 expanded_ids=expanded_ids,
                 current_depth=current_depth + 1,
                 path=next_path,
@@ -387,6 +552,7 @@ def print_tree(
     global_dedupe: bool,
     shortest_base_only: bool,
     base_depth_cache: BaseDepthCache,
+    route_plan: BaseRoutePlan | None,
     expanded_ids: set[int],
     current_depth: int = 0,
     path: tuple[int, ...] = (),
@@ -403,6 +569,7 @@ def print_tree(
         global_dedupe=global_dedupe,
         shortest_base_only=shortest_base_only,
         base_depth_cache=base_depth_cache,
+        route_plan=route_plan,
         expanded_ids=expanded_ids,
         current_depth=current_depth,
         path=path,
@@ -423,6 +590,7 @@ def build_tree_html_node(
     global_dedupe: bool,
     shortest_base_only: bool,
     base_depth_cache: BaseDepthCache,
+    route_plan: BaseRoutePlan | None,
     expanded_ids: set[int],
     current_depth: int = 0,
     path: tuple[int, ...] = (),
@@ -481,6 +649,7 @@ def build_tree_html_node(
                     base_names=base_names,
                     cache=base_depth_cache,
                     remaining_depth=max_depth - current_depth,
+                    route_plan=route_plan,
                 )
             direct_base_count = sum(
                 1
@@ -518,15 +687,23 @@ def build_tree_html_node(
                 is_base_object(ingredient_a, base_ids=base_ids, base_names=base_names)
                 or is_base_object(ingredient_b, base_ids=base_ids, base_names=base_names)
             )
-            base_depth = source_base_depth(
-                client,
-                source,
-                base_ids=base_ids,
-                base_names=base_names,
-                cache=base_depth_cache,
-                visiting=set(),
-                remaining_depth=max_depth - current_depth,
-            )
+            if route_plan is None:
+                base_depth = source_base_depth(
+                    client,
+                    source,
+                    base_ids=base_ids,
+                    base_names=base_names,
+                    cache=base_depth_cache,
+                    visiting=set(),
+                    remaining_depth=max_depth - current_depth,
+                )
+            else:
+                base_depth = source_depth_from_plan(
+                    source,
+                    base_ids=base_ids,
+                    base_names=base_names,
+                    route_plan=route_plan,
+                )
             is_base_reachable = base_depth is not None
             recipe_class = "recipe base-recipe" if is_base_reachable else "recipe"
             badge_html = '<div class="base-badge">基础可达</div>' if is_base_reachable else ""
@@ -541,12 +718,12 @@ def build_tree_html_node(
                 continue
 
             recipes.append(
-                f"<details class=\"{recipe_class}\" open>"
+                f"<details class=\"{recipe_class}\">"
                 f"<summary class=\"recipe-label\">{html.escape(source_label)}</summary>"
                 f"{badge_html}"
                 "<div class=\"ingredient-pair\">"
-                f"{build_tree_html_node(client, ingredient_a, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='A: ')}"
-                f"{build_tree_html_node(client, ingredient_b, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='B: ')}"
+                f"{build_tree_html_node(client, ingredient_a, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='A: ')}"
+                f"{build_tree_html_node(client, ingredient_b, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='B: ')}"
                 "</div>"
                 "</details>"
             )
@@ -554,7 +731,7 @@ def build_tree_html_node(
     note_html = "".join(f"<div class=\"note\">{html.escape(note)}</div>" for note in notes)
     if recipes:
         return (
-            f"<details class=\"tree-node{state_class}\" open>"
+            f"<details class=\"tree-node{state_class}\">"
             f"<summary class=\"object-label\">{label}</summary>"
             f"{note_html}<div class=\"recipe-row\">{''.join(recipes)}</div>"
             "</details>"
@@ -573,6 +750,7 @@ def build_html_document(
     global_dedupe: bool,
     shortest_base_only: bool,
     base_depth_cache: BaseDepthCache,
+    route_plan: BaseRoutePlan | None,
 ) -> str:
     title = f"合成树 - {format_object(target, show_id=show_id)}"
     body = build_tree_html_node(
@@ -585,6 +763,7 @@ def build_html_document(
         global_dedupe=global_dedupe,
         shortest_base_only=shortest_base_only,
         base_depth_cache=base_depth_cache,
+        route_plan=route_plan,
         expanded_ids=set(),
     )
     return f"""<!doctype html>
@@ -640,6 +819,7 @@ def build_html_document(
       background: #fff;
       cursor: grab;
       touch-action: none;
+      user-select: none;
     }}
     .tree-viewport.dragging {{
       cursor: grabbing;
@@ -693,12 +873,12 @@ def build_html_document(
       align-items: flex-start;
       justify-content: center;
       gap: 18px;
-      padding-top: 28px;
+      padding-top: 56px;
     }}
     .recipe-row::before {{
       content: "";
       position: absolute;
-      z-index: 0;
+      z-index: 4;
       top: 0;
       left: 50%;
       width: 1px;
@@ -708,10 +888,10 @@ def build_html_document(
     .recipe-row::after {{
       content: "";
       position: absolute;
-      z-index: 0;
+      z-index: 4;
       top: 28px;
-      left: 18px;
-      right: 18px;
+      left: var(--branch-left, 18px);
+      right: var(--branch-right, 18px);
       height: 1px;
       background: #b9c5b3;
     }}
@@ -725,19 +905,18 @@ def build_html_document(
       flex-direction: column;
       align-items: center;
       min-width: 330px;
-      padding: 10px;
-      border: 1px solid #d8ded2;
-      border-radius: 8px;
-      background: #f8faf5;
+      padding: 0;
+      border: 0;
+      background: transparent;
     }}
     .recipe::before {{
       content: "";
       position: absolute;
-      z-index: 0;
-      top: -29px;
+      z-index: 4;
+      top: -28px;
       left: 50%;
       width: 1px;
-      height: 29px;
+      height: 28px;
       background: #b9c5b3;
     }}
     .recipe-label {{
@@ -756,9 +935,7 @@ def build_html_document(
       overflow-wrap: anywhere;
     }}
     .base-recipe {{
-      border-color: #d5a642;
-      background: #fff8df;
-      box-shadow: 0 0 0 2px #f0c85a33;
+      background: transparent;
     }}
     .base-recipe > .recipe-label {{
       background: #ffe6a6;
@@ -792,7 +969,7 @@ def build_html_document(
     .ingredient-pair::before {{
       content: "";
       position: absolute;
-      z-index: 0;
+      z-index: 4;
       top: 0;
       left: 50%;
       width: 1px;
@@ -802,7 +979,7 @@ def build_html_document(
     .ingredient-pair::after {{
       content: "";
       position: absolute;
-      z-index: 0;
+      z-index: 4;
       top: 28px;
       left: 25%;
       right: 25%;
@@ -817,12 +994,20 @@ def build_html_document(
     .ingredient-pair > .tree-node::before {{
       content: "";
       position: absolute;
-      z-index: 0;
+      z-index: 4;
       top: -28px;
       left: 50%;
       width: 1px;
       height: 28px;
       background: #b9c5b3;
+    }}
+    .recipe-row::before,
+    .recipe-row::after,
+    .recipe::before,
+    .ingredient-pair::before,
+    .ingredient-pair::after,
+    .ingredient-pair > .tree-node::before {{
+      pointer-events: none;
     }}
     .note {{
       position: relative;
@@ -830,6 +1015,25 @@ def build_html_document(
       margin: 4px 0;
       color: #697568;
       font-size: 13px;
+    }}
+    .tree-node > .note {{
+      position: absolute;
+      left: calc(50% + 118px);
+      top: 0;
+      width: 220px;
+      margin: 0;
+      padding: 3px 6px;
+      border-left: 2px solid #d8ded2;
+      background: #ffffffd9;
+      text-align: left;
+      line-height: 1.35;
+      pointer-events: none;
+    }}
+    .tree-node > .note + .note {{
+      top: 28px;
+    }}
+    .tree-node > .note + .note + .note {{
+      top: 56px;
     }}
     .base > .object-label {{ color: #246b45; border-color: #91b79c; background: #f1faf2; }}
     .pruned > .object-label, .pruned-source .recipe-label {{ color: #9a3f2d; border-color: #d7a092; background: #fff7f4; }}
@@ -852,8 +1056,8 @@ def build_html_document(
 <body>
   <h1>{html.escape(title)}</h1>
   <div class="toolbar">
-    <button onclick="document.querySelectorAll('details').forEach(d => d.open = true)">全部展开</button>
-    <button onclick="document.querySelectorAll('details').forEach(d => d.open = false)">全部折叠</button>
+    <button onclick="setAllDetails(true)">全部展开</button>
+    <button onclick="setAllDetails(false)">全部折叠</button>
     <button onclick="zoomBy(1.2)">放大</button>
     <button onclick="zoomBy(1 / 1.2)">缩小</button>
     <button onclick="resetView()">重置视图</button>
@@ -867,13 +1071,15 @@ def build_html_document(
     const canvas = document.getElementById("treeCanvas");
     const zoomIndicator = document.getElementById("zoomIndicator");
     let scale = 1;
-    let translateX = 20;
-    let translateY = 20;
+    let translateX = 0;
+    let translateY = 0;
     let dragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
     let originX = 0;
     let originY = 0;
+    let pointerIsDown = false;
+    let movedDuringPointer = false;
 
     function clampScale(value) {{
       return Math.min(3, Math.max(0.12, value));
@@ -905,10 +1111,34 @@ def build_html_document(
 
     function resetView() {{
       scale = 1;
-      translateX = 20;
-      translateY = 20;
+      translateX = 0;
+      translateY = 0;
       applyTransform();
     }}
+
+    function layoutRecipeRows() {{
+      document.querySelectorAll(".recipe-row").forEach(row => {{
+        const recipes = Array.from(row.children).filter(child => child.classList.contains("recipe"));
+        if (recipes.length < 2 || row.offsetWidth === 0) return;
+        const first = recipes[0];
+        const last = recipes[recipes.length - 1];
+        const left = first.offsetLeft + first.offsetWidth / 2;
+        const right = row.offsetWidth - (last.offsetLeft + last.offsetWidth / 2);
+        row.style.setProperty("--branch-left", `${{left}}px`);
+        row.style.setProperty("--branch-right", `${{right}}px`);
+      }});
+    }}
+
+    function setAllDetails(open) {{
+      document.querySelectorAll("details").forEach(details => details.open = open);
+      requestAnimationFrame(layoutRecipeRows);
+    }}
+
+    document.addEventListener("toggle", event => {{
+      if (event.target instanceof HTMLDetailsElement) {{
+        requestAnimationFrame(layoutRecipeRows);
+      }}
+    }}, true);
 
     viewport.addEventListener("wheel", event => {{
       event.preventDefault();
@@ -916,32 +1146,69 @@ def build_html_document(
     }}, {{ passive: false }});
 
     viewport.addEventListener("pointerdown", event => {{
+      pointerIsDown = true;
+      movedDuringPointer = false;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      if (event.button !== 2) return;
+      event.preventDefault();
       dragging = true;
       viewport.classList.add("dragging");
       viewport.setPointerCapture(event.pointerId);
-      dragStartX = event.clientX;
-      dragStartY = event.clientY;
       originX = translateX;
       originY = translateY;
     }});
 
     viewport.addEventListener("pointermove", event => {{
+      if (pointerIsDown && (Math.abs(event.clientX - dragStartX) > 3 || Math.abs(event.clientY - dragStartY) > 3)) {{
+        movedDuringPointer = true;
+      }}
       if (!dragging) return;
       translateX = originX + event.clientX - dragStartX;
       translateY = originY + event.clientY - dragStartY;
       applyTransform();
     }});
 
+    viewport.addEventListener("contextmenu", event => {{
+      event.preventDefault();
+    }});
+
+    function toggleDetailsAt(clientX, clientY) {{
+      const target = document.elementFromPoint(clientX, clientY);
+      if (!(target instanceof Element)) return;
+      const details = target.closest("details.tree-node, details.recipe");
+      if (!details || !canvas.contains(details)) return;
+      details.open = !details.open;
+      requestAnimationFrame(layoutRecipeRows);
+    }}
+
+    viewport.addEventListener("click", event => {{
+      if (movedDuringPointer) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const details = target.closest("details.tree-node, details.recipe");
+      if (!details || !canvas.contains(details)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    }});
+
     function stopDrag(event) {{
       dragging = false;
+      pointerIsDown = false;
       viewport.classList.remove("dragging");
       if (event.pointerId !== undefined) {{
         try {{ viewport.releasePointerCapture(event.pointerId); }} catch {{}}
       }}
     }}
 
-    viewport.addEventListener("pointerup", stopDrag);
+    viewport.addEventListener("pointerup", event => {{
+      if (event.button !== 2 && !movedDuringPointer) {{
+        toggleDetailsAt(event.clientX, event.clientY);
+      }}
+      stopDrag(event);
+    }});
     viewport.addEventListener("pointercancel", stopDrag);
+    layoutRecipeRows();
     applyTransform();
   </script>
 </body>

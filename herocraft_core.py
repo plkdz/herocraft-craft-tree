@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 文件职责：集中存放常量、类型定义、进度统计和无网络副作用的通用工具函数。
+
 import datetime as dt
 import os
 import sys
