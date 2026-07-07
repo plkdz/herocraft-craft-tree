@@ -1109,11 +1109,27 @@ def build_html_document(
       zoomAt(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
     }}
 
+    function rootLabel() {{
+      return document.querySelector(".tree-root > details.tree-node > summary.object-label, .tree-root > .tree-node > .object-label");
+    }}
+
+    function centerElement(element) {{
+      const viewportRect = viewport.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      translateX += viewportRect.left + viewportRect.width / 2 - (elementRect.left + elementRect.width / 2);
+      translateY += viewportRect.top + viewportRect.height / 2 - (elementRect.top + elementRect.height / 2);
+      applyTransform();
+    }}
+
     function resetView() {{
       scale = 1;
       translateX = 0;
       translateY = 0;
       applyTransform();
+      requestAnimationFrame(() => {{
+        const element = rootLabel();
+        if (element) centerElement(element);
+      }});
     }}
 
     function layoutRecipeRows() {{
