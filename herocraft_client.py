@@ -102,10 +102,10 @@ class HeroCraftClient:
             with self._detail_cache_lock:
                 detail_cache = {str(object_id): obj for object_id, obj in self._detail_cache.items()}
             with open(self._cache_path(DETAIL_CACHE_FILE), "w", encoding="utf-8") as file:
-                json.dump(detail_cache, file, ensure_ascii=False, separators=(",", ":"))
+                json.dump(detail_cache, file, ensure_ascii=False, indent=2)
             if self._mine_cache is not None:
                 with open(self._cache_path(INVENTORY_CACHE_FILE), "w", encoding="utf-8") as file:
-                    json.dump(self._mine_cache, file, ensure_ascii=False, separators=(",", ":"))
+                    json.dump(self._mine_cache, file, ensure_ascii=False, indent=2)
             self._details_since_save = 0
 
     def maybe_save_cache(self) -> None:
