@@ -686,12 +686,11 @@ def build_tree_html_node(
                 )
             is_base_reachable = base_depth is not None
             recipe_class = "recipe base-recipe" if is_base_reachable else "recipe"
-            badge_html = '<div class="base-badge">基础可达</div>' if is_base_reachable else ""
+            badge_html = '<span class="base-badge">基础可达</span>' if is_base_reachable else ""
             if any(ingredient_id in next_path for ingredient_id in ingredient_ids):
                 recipes.append(
                     f"<div class=\"{recipe_class} pruned-source\">"
-                    f"<div class=\"recipe-label\">{html.escape(source_label)}</div>"
-                    f"{badge_html}"
+                    f"<div class=\"recipe-label\"><span>{html.escape(source_label)}</span>{badge_html}</div>"
                     "<div class=\"note\">剪枝：会回到当前线路已有对象</div>"
                     "</div>"
                 )
@@ -699,8 +698,7 @@ def build_tree_html_node(
 
             recipes.append(
                 f"<details class=\"{recipe_class}\">"
-                f"<summary class=\"recipe-label\">{html.escape(source_label)}</summary>"
-                f"{badge_html}"
+                f"<summary class=\"recipe-label\"><span>{html.escape(source_label)}</span>{badge_html}</summary>"
                 "<div class=\"ingredient-pair\">"
                 f"{build_tree_html_node(client, ingredient_a, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='A: ')}"
                 f"{build_tree_html_node(client, ingredient_b, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='B: ')}"
@@ -928,6 +926,8 @@ def build_html_document(
       position: relative;
       z-index: 2;
       display: inline-flex;
+      align-items: center;
+      gap: 8px;
       justify-content: center;
       max-width: 310px;
       min-height: 30px;
@@ -947,17 +947,12 @@ def build_html_document(
       color: #6e4b00;
     }}
     .base-badge {{
-      position: relative;
-      z-index: 2;
-      grid-column: 1;
-      align-self: start;
-      justify-self: start;
-      margin: 6px 0 0 4px;
+      flex: 0 0 auto;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 24px;
-      padding: 3px 8px;
+      min-height: 20px;
+      padding: 2px 7px;
       border-radius: 999px;
       background: #2f7d48;
       color: #fff;
