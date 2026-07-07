@@ -496,6 +496,7 @@ def build_blocker_html_report(
 
     function setAllDetails(open) {{
       document.querySelectorAll("details").forEach(details => details.open = open);
+      requestAnimationFrame(resetView);
     }}
 
     viewport.addEventListener("wheel", event => {{

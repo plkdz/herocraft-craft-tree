@@ -1128,6 +1128,7 @@ def build_html_document(
     function setAllDetails(open) {{
       document.querySelectorAll("details").forEach(details => details.open = open);
       requestAnimationFrame(layoutRecipeRows);
+      requestAnimationFrame(resetView);
     }}
 
     document.addEventListener("toggle", event => {{
