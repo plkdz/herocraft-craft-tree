@@ -2,6 +2,12 @@
 
 HeroCraft 合成树查询与 HTML 可视化工具。
 
+运行环境：
+
+- Python 3.9+。
+- 依赖库：`Pillow`，用于 `--image` 拼接完整 PNG；安装命令：`python -m pip install -r requirements.txt`。
+- 浏览器：本机需要 Edge 或 Chrome；默认自动查找，也可用环境变量 `HEROCRAFT_BROWSER` 指定浏览器 exe 路径。
+
 最快使用：
 
 1. 获得 session：浏览器登录 HeroCraft 后，在开发者工具 Network 里打开 `/api/auth/me`，复制请求头里的 `Cookie: hc_session=...`，写入 `.herocraft_session`。
@@ -96,4 +102,5 @@ PowerShell 补全：
 - [herocraft_image.md](herocraft_image.md)：HTML 全量展开和 PNG 渲染。
 - [herocraft_tree.md](herocraft_tree.md)：动态规划合成路线、剪枝、HTML/text 渲染。
 - [herocraft_completion.md](herocraft_completion.md)：PowerShell 参数补全。
+- [requirements.txt](requirements.txt)：Python 第三方依赖列表。
 - [known/README.md](known/README.md)：已保存的 HeroCraft 前端静态文件来源说明。
