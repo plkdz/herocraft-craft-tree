@@ -300,6 +300,7 @@ def filter_shortest_base_sources(
     base_names: set[str],
     cache: BaseDepthCache,
     remaining_depth: int,
+    single_shortest_route: bool,
     route_plan: BaseRoutePlan | None = None,
 ) -> tuple[list[CraftSource], int | None, int]:
     if client._progress is not None:
@@ -313,6 +314,8 @@ def filter_shortest_base_sources(
         and is_base_object(source["ingredient_b"], base_ids=base_ids, base_names=base_names)
     ]
     if direct_base_sources:
+        if single_shortest_route:
+            return direct_base_sources[:1], 1, len(direct_base_sources)
         return direct_base_sources, 1, len(direct_base_sources)
 
     source_depths: list[tuple[CraftSource, int]] = []
@@ -344,7 +347,10 @@ def filter_shortest_base_sources(
         return sources, None, 0
 
     shortest_depth = min(depth for _, depth in source_depths)
-    return [source for source, depth in source_depths if depth == shortest_depth], shortest_depth, len(source_depths)
+    shortest_sources = [source for source, depth in source_depths if depth == shortest_depth]
+    if single_shortest_route:
+        shortest_sources = shortest_sources[:1]
+    return shortest_sources, shortest_depth, len(source_depths)
 
 
 def prefetch_source_ingredients(
@@ -387,6 +393,7 @@ def build_tree_text(
     show_id: bool,
     global_dedupe: bool,
     shortest_base_only: bool,
+    single_shortest_route: bool,
     base_depth_cache: BaseDepthCache,
     route_plan: BaseRoutePlan | None,
     expanded_ids: set[int],
@@ -446,6 +453,7 @@ def build_tree_text(
             base_names=base_names,
             cache=base_depth_cache,
             remaining_depth=max_depth - current_depth,
+            single_shortest_route=single_shortest_route,
             route_plan=route_plan,
         )
 
@@ -500,6 +508,7 @@ def build_tree_text(
                 show_id=show_id,
                 global_dedupe=global_dedupe,
                 shortest_base_only=shortest_base_only,
+                single_shortest_route=single_shortest_route,
                 base_depth_cache=base_depth_cache,
                 route_plan=route_plan,
                 expanded_ids=expanded_ids,
@@ -519,6 +528,7 @@ def build_tree_text(
                 show_id=show_id,
                 global_dedupe=global_dedupe,
                 shortest_base_only=shortest_base_only,
+                single_shortest_route=single_shortest_route,
                 base_depth_cache=base_depth_cache,
                 route_plan=route_plan,
                 expanded_ids=expanded_ids,
@@ -541,6 +551,7 @@ def print_tree(
     show_id: bool,
     global_dedupe: bool,
     shortest_base_only: bool,
+    single_shortest_route: bool,
     base_depth_cache: BaseDepthCache,
     route_plan: BaseRoutePlan | None,
     expanded_ids: set[int],
@@ -558,6 +569,7 @@ def print_tree(
         show_id=show_id,
         global_dedupe=global_dedupe,
         shortest_base_only=shortest_base_only,
+        single_shortest_route=single_shortest_route,
         base_depth_cache=base_depth_cache,
         route_plan=route_plan,
         expanded_ids=expanded_ids,
@@ -579,6 +591,7 @@ def build_tree_html_node(
     show_id: bool,
     global_dedupe: bool,
     shortest_base_only: bool,
+    single_shortest_route: bool,
     base_depth_cache: BaseDepthCache,
     route_plan: BaseRoutePlan | None,
     expanded_ids: set[int],
@@ -639,6 +652,7 @@ def build_tree_html_node(
                     base_names=base_names,
                     cache=base_depth_cache,
                     remaining_depth=max_depth - current_depth,
+                    single_shortest_route=single_shortest_route,
                     route_plan=route_plan,
                 )
             if shortest_base_depth_value is not None:
@@ -700,8 +714,8 @@ def build_tree_html_node(
                 f"<details class=\"{recipe_class}\">"
                 f"<summary class=\"recipe-label\"><span>{html.escape(source_label)}</span>{badge_html}</summary>"
                 "<div class=\"ingredient-pair\">"
-                f"{build_tree_html_node(client, ingredient_a, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='A: ')}"
-                f"{build_tree_html_node(client, ingredient_b, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='B: ')}"
+                f"{build_tree_html_node(client, ingredient_a, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, single_shortest_route=single_shortest_route, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='A: ')}"
+                f"{build_tree_html_node(client, ingredient_b, max_depth=max_depth, base_ids=base_ids, base_names=base_names, show_id=show_id, global_dedupe=global_dedupe, shortest_base_only=shortest_base_only, single_shortest_route=single_shortest_route, base_depth_cache=base_depth_cache, route_plan=route_plan, expanded_ids=expanded_ids, current_depth=current_depth + 1, path=next_path, branch_label='B: ')}"
                 "</div>"
                 "</details>"
             )
@@ -728,6 +742,7 @@ def build_html_document(
     show_id: bool,
     global_dedupe: bool,
     shortest_base_only: bool,
+    single_shortest_route: bool,
     base_depth_cache: BaseDepthCache,
     route_plan: BaseRoutePlan | None,
 ) -> str:
@@ -741,6 +756,7 @@ def build_html_document(
         show_id=show_id,
         global_dedupe=global_dedupe,
         shortest_base_only=shortest_base_only,
+        single_shortest_route=single_shortest_route,
         base_depth_cache=base_depth_cache,
         route_plan=route_plan,
         expanded_ids=set(),

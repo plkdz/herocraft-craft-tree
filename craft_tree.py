@@ -576,6 +576,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="显示全部已知配方；默认只显示基础可达的最短配方",
     )
+    parser.add_argument(
+        "--single-shortest-route",
+        action="store_true",
+        help="只保留一条基础可达最短合成路线；默认仍使用全局去重保证速度",
+    )
     parser.add_argument("--workers", type=int, default=8, help="并发请求数量；设为 1 可关闭并发")
     parser.add_argument("--branch-workers", type=int, default=2, help="单条配方 A/B 分支并发数；设为 1 可关闭")
     parser.add_argument("--deep-workers", type=int, default=6, help="递归筛选内部并发数；设为 1 最稳")
@@ -664,6 +669,8 @@ def main() -> None:
         fail("--image 只能和 --format html 一起使用")
     if args.image_width < 1 or args.image_height < 1:
         fail("--image-width 和 --image-height 必须大于 0")
+    if args.show_all_sources and args.single_shortest_route:
+        fail("--single-shortest-route 不能和 --show-all-sources 同时使用")
     request_limit = int(args.request_limit) if int(args.request_limit) > 0 else int(args.workers)
 
     progress = ProgressStats(start_time=time.time())
@@ -694,6 +701,8 @@ def main() -> None:
         output_format: OutputFormat = args.format
         base_depth_cache: BaseDepthCache = {}
         shortest_base_only = not bool(args.show_all_sources)
+        single_shortest_route = bool(args.single_shortest_route) and shortest_base_only
+        global_dedupe = not bool(args.no_global_dedupe)
         route_plan = build_base_route_plan(
             client,
             target,
@@ -736,8 +745,9 @@ def main() -> None:
                 base_ids=base_ids,
                 base_names=base_names,
                 show_id=bool(args.show_id),
-                global_dedupe=not bool(args.no_global_dedupe),
+                global_dedupe=global_dedupe,
                 shortest_base_only=shortest_base_only,
+                single_shortest_route=single_shortest_route,
                 base_depth_cache=base_depth_cache,
                 route_plan=route_plan,
             )
@@ -749,8 +759,9 @@ def main() -> None:
                 base_ids=base_ids,
                 base_names=base_names,
                 show_id=bool(args.show_id),
-                global_dedupe=not bool(args.no_global_dedupe),
+                global_dedupe=global_dedupe,
                 shortest_base_only=shortest_base_only,
+                single_shortest_route=single_shortest_route,
                 base_depth_cache=base_depth_cache,
                 route_plan=route_plan,
                 expanded_ids=set(),
@@ -791,7 +802,10 @@ def main() -> None:
             else:
                 print(f"基础合成路线：已找到，最短深度 {base_route_depth}", file=sys.stderr)
             if shortest_base_only:
-                print("配方显示：只显示基础可达的最短配方；如需全部配方，加 --show-all-sources", file=sys.stderr)
+                if single_shortest_route:
+                    print("配方显示：只显示一条基础可达最短路线；如需重复子树也完整展开，加 --no-global-dedupe", file=sys.stderr)
+                else:
+                    print("配方显示：只显示基础可达的最短配方；如需全部配方，加 --show-all-sources", file=sys.stderr)
             else:
                 print("配方显示：全部已知配方", file=sys.stderr)
             if scored_blockers:

@@ -8,6 +8,7 @@
 python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100 --image
+python craft_tree.py 末日鱼雷 装备 --max-depth 999 --workers 20 --deep-workers 6 --request-limit 100 --single-shortest-route --image
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable --refresh-inventory
@@ -22,6 +23,7 @@ python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 2
 - `--max-depth` 控制最大展开深度；动态规划会在这个深度内判断能否回到基础元素。
 - `--no-global-dedupe` 关闭全局去重，允许同一对象在不同线路重复展开。
 - `--show-all-sources` 显示全部已知配方；默认只显示基础可达的最短配方。
+- `--single-shortest-route` 只保留一条基础可达最短路线；默认仍使用全局去重保证速度，如需重复子树也完整展开，再加 `--no-global-dedupe`；不能和 `--show-all-sources` 同时使用。
 - `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发，`--request-limit` 控制 HTTP 总并发闸门。
 - `--branch-workers` 控制单条配方 A/B 两个材料分支并发，最多有效值是 2。
 - `--cache-dir` 指定本机缓存目录。
