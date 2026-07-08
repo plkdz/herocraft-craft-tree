@@ -2,6 +2,34 @@
 
 HeroCraft 合成树查询与 HTML 可视化工具。
 
+最快使用：
+
+1. 获得 session：浏览器登录 HeroCraft 后，在开发者工具 Network 里打开 `/api/auth/me`，复制请求头里的 `Cookie: hc_session=...`，写入 `.herocraft_session`。
+
+```powershell
+Set-Content -Path .herocraft_session -Encoding utf8 -Value '这里粘贴 hc_session 的值，不要带 hc_session='
+```
+
+例如：
+
+```powershell
+Set-Content -Path .herocraft_session -Encoding utf8 -Value '123456=.123456'
+```
+
+注意，只复制纯字符。
+
+1. 同步缓存：
+
+```powershell
+python sync_cache.py --workers 100 --request-limit 1000
+```
+
+1. 查询配方：
+
+```powershell
+python craft_tree.py 蒸汽 元素 --max-depth 999 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable --single-shortest-route --image
+```
+
 常用命令：
 
 ```powershell
