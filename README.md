@@ -5,9 +5,11 @@ HeroCraft 合成树查询与 HTML 可视化工具。
 常用命令：
 
 ```powershell
+. .\herocraft_completion.ps1
 python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
 python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100 --image
+python craft_tree.py 末日鱼雷 装备 --max-depth 999 --workers 20 --deep-workers 6 --request-limit 100 --single-shortest-route --image
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
 python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable --refresh-inventory
 python sync_cache.py --workers 100 --request-limit 1000
@@ -29,6 +31,7 @@ python sync_cache.py --missing-only --workers 100 --request-limit 1000
 - `--max-depth`：最大展开深度；动态规划仍会用这个上限判断基础可达路线。
 - `--no-global-dedupe`：关闭全局去重，允许同一对象在不同线路重复展开。
 - `--show-all-sources`：显示全部已知配方；不加时只显示基础可达的最短配方。
+- `--single-shortest-route`：只保留一条基础可达最短路线；默认仍使用全局去重保证速度，如需重复子树也完整展开，再加 `--no-global-dedupe`。
 - `--workers`：批量请求对象详情的并发数。
 - `--branch-workers`：单条配方 A/B 分支并发数，最多有效值是 2。
 - `--deep-workers`：递归判定路线时的内部并发数。
@@ -52,6 +55,10 @@ python sync_cache.py --missing-only --workers 100 --request-limit 1000
 
 - `sync_cache.py --missing-only`：只补齐本机没有详情缓存的对象；如果外部配方变了，仍应跑不带此参数的全量刷新。
 
+PowerShell 补全：
+
+- 当前窗口先执行 `. .\herocraft_completion.ps1`，之后输入 `python craft_tree.py --` 或 `python sync_cache.py --` 按 Tab 会补全参数。
+
 源码说明：
 
 - [craft_tree.md](craft_tree.md)：命令行入口、参数、输出流程。
@@ -60,4 +67,5 @@ python sync_cache.py --missing-only --workers 100 --request-limit 1000
 - [herocraft_client.md](herocraft_client.md)：HTTP API、缓存、对象解析。
 - [herocraft_image.md](herocraft_image.md)：HTML 全量展开和 PNG 渲染。
 - [herocraft_tree.md](herocraft_tree.md)：动态规划合成路线、剪枝、HTML/text 渲染。
+- [herocraft_completion.md](herocraft_completion.md)：PowerShell 参数补全。
 - [known/README.md](known/README.md)：已保存的 HeroCraft 前端静态文件来源说明。
