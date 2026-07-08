@@ -9,6 +9,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -180,6 +181,11 @@ def save_tiled_screenshot(
 ) -> int:
     image = Image.new("RGBA", (page_width, page_height), (255, 255, 255, 255))
     message_id = next_message_id
+    x_tiles = (page_width + SCREENSHOT_TILE_SIZE - 1) // SCREENSHOT_TILE_SIZE
+    y_tiles = (page_height + SCREENSHOT_TILE_SIZE - 1) // SCREENSHOT_TILE_SIZE
+    total_tiles = x_tiles * y_tiles
+    done_tiles = 0
+    print(f"图片导出：{page_width}x{page_height}，共 {total_tiles} 块", file=sys.stderr)
     for y in range(0, page_height, SCREENSHOT_TILE_SIZE):
         tile_height = min(SCREENSHOT_TILE_SIZE, page_height - y)
         for x in range(0, page_width, SCREENSHOT_TILE_SIZE):
@@ -188,7 +194,12 @@ def save_tiled_screenshot(
             message_id += 1
             with Image.open(io.BytesIO(tile_data)) as tile:
                 image.paste(tile.convert("RGBA"), (x, y))
+            done_tiles += 1
+            percent = done_tiles * 100 / total_tiles
+            print(f"\r图片导出：{done_tiles}/{total_tiles} 块，{percent:5.1f}%", end="", file=sys.stderr)
+    print("\r图片导出：正在写入 PNG 文件...", file=sys.stderr)
     image.save(image_path)
+    print("图片导出：PNG 文件写入完成", file=sys.stderr)
     return message_id
 
 
