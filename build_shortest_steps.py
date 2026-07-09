@@ -3,9 +3,9 @@ from __future__ import annotations
 # 文件职责：离线读取本机详情缓存，生成从基础元素出发的最少合成步数表。
 #
 # 常用命令：
-# python build_shortest_routes.py
-# python build_shortest_routes.py --candidate-limit 16 --max-iterations 999
-# python build_shortest_routes.py --self-test
+# python build_shortest_steps.py
+# python build_shortest_steps.py --candidate-limit 8 --max-iterations 999
+# python build_shortest_steps.py --self-test
 
 import argparse
 import datetime as dt
@@ -31,13 +31,15 @@ from herocraft_core import (
     require_id,
 )
 
-SHORTEST_ROUTES_FILE = "shortest_routes.json"
+SHORTEST_STEPS_FILE = "shortest_steps.json"
 
 
 @dataclass(frozen=True)
-class RouteCandidate:
+class StepCandidate:
+    steps: int
     required_ids: frozenset[int]
     recipe: CraftSource | None
+    ingredient_candidates: tuple["StepCandidate", "StepCandidate"] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,10 +52,10 @@ class RecipeEdge:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成 HeroCraft 最少合成步数缓存")
     parser.add_argument("--cache-dir", default=CACHE_DIR, help="缓存目录")
-    parser.add_argument("--output", default="", help=f"输出文件，默认写入缓存目录下 {SHORTEST_ROUTES_FILE}")
+    parser.add_argument("--output", default="", help=f"输出文件，默认写入缓存目录下 {SHORTEST_STEPS_FILE}")
     parser.add_argument("--base-ids", default="", help="额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default=",".join(sorted(DEFAULT_BASE_NAMES)), help="基础元素名称，逗号分隔")
-    parser.add_argument("--candidate-limit", type=int, default=16, help="每个对象最多保留的非支配候选路线数")
+    parser.add_argument("--candidate-limit", type=int, default=8, help="每个对象最多保留的非支配候选路线数")
     parser.add_argument("--max-iterations", type=int, default=999, help="最大固定点迭代轮数")
     parser.add_argument("--self-test", action="store_true", help="运行内置自检，不读取缓存")
     return parser.parse_args()
@@ -88,13 +90,13 @@ def resolve_base_ids(
     return resolved
 
 
-def prune_candidates(candidates: list[RouteCandidate], *, limit: int) -> tuple[RouteCandidate, ...]:
-    unique: dict[frozenset[int], RouteCandidate] = {}
+def prune_candidates(candidates: list[StepCandidate], *, limit: int) -> tuple[StepCandidate, ...]:
+    unique: dict[frozenset[int], StepCandidate] = {}
     for candidate in candidates:
         unique.setdefault(candidate.required_ids, candidate)
-    kept: list[RouteCandidate] = []
-    for candidate in sorted(unique.values(), key=lambda item: (len(item.required_ids), sorted(item.required_ids))):
-        if any(existing.required_ids.issubset(candidate.required_ids) for existing in kept):
+    kept: list[StepCandidate] = []
+    for candidate in sorted(unique.values(), key=lambda item: (item.steps, len(item.required_ids), sorted(item.required_ids))):
+        if any(existing.steps <= candidate.steps and existing.required_ids.issubset(candidate.required_ids) for existing in kept):
             continue
         kept.append(candidate)
         if len(kept) >= limit:
@@ -120,28 +122,30 @@ def source_candidates(
     source: CraftSource,
     *,
     result_id: int,
-    candidates_by_id: dict[int, tuple[RouteCandidate, ...]],
+    candidates_by_id: dict[int, tuple[StepCandidate, ...]],
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
-) -> tuple[RouteCandidate, ...]:
-    options: list[tuple[RouteCandidate, ...]] = []
+) -> tuple[StepCandidate, ...]:
+    options: list[tuple[StepCandidate, ...]] = []
     for ingredient in (source["ingredient_a"], source["ingredient_b"]):
         if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
-            options.append((RouteCandidate(frozenset(), None),))
+            options.append((StepCandidate(0, frozenset(), None),))
             continue
         ingredient_options = candidates_by_id.get(require_id(ingredient))
         if not ingredient_options:
             return ()
         options.append(ingredient_options)
 
-    candidates: list[RouteCandidate] = []
+    candidates: list[StepCandidate] = []
     for left in options[0]:
         for right in options[1]:
             candidates.append(
-                RouteCandidate(
+                StepCandidate(
+                    steps=left.steps + right.steps + 1,
                     required_ids=frozenset({result_id}) | left.required_ids | right.required_ids,
                     recipe=source,
+                    ingredient_candidates=(left, right),
                 )
             )
     return prune_candidates(candidates, limit=candidate_limit)
@@ -150,11 +154,11 @@ def source_candidates(
 def edge_candidates(
     edge: RecipeEdge,
     *,
-    candidates_by_id: dict[int, tuple[RouteCandidate, ...]],
+    candidates_by_id: dict[int, tuple[StepCandidate, ...]],
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
-) -> tuple[RouteCandidate, ...]:
+) -> tuple[StepCandidate, ...]:
     return source_candidates(
         edge.source,
         result_id=edge.result_id,
@@ -165,7 +169,7 @@ def edge_candidates(
     )
 
 
-def build_shortest_routes(
+def build_shortest_steps(
     details: dict[int, ApiObject],
     *,
     base_ids: set[int],
@@ -173,9 +177,9 @@ def build_shortest_routes(
     candidate_limit: int,
     max_iterations: int,
     show_progress: bool,
-) -> dict[int, tuple[RouteCandidate, ...]]:
-    candidates_by_id: dict[int, tuple[RouteCandidate, ...]] = {
-        object_id: (RouteCandidate(frozenset(), None),)
+) -> dict[int, tuple[StepCandidate, ...]]:
+    candidates_by_id: dict[int, tuple[StepCandidate, ...]] = {
+        object_id: (StepCandidate(0, frozenset(), None),)
         for object_id, obj in details.items()
         if is_base_object(obj, base_ids=base_ids, base_names=base_names)
     }
@@ -242,41 +246,93 @@ def build_shortest_routes(
     return candidates_by_id
 
 
-def best_candidate(candidates: tuple[RouteCandidate, ...]) -> RouteCandidate:
-    return min(candidates, key=lambda item: (len(item.required_ids), sorted(item.required_ids)))
+def best_candidate(candidates: tuple[StepCandidate, ...]) -> StepCandidate:
+    return min(candidates, key=lambda item: (item.steps, len(item.required_ids), sorted(item.required_ids)))
 
 
-def route_record(obj: ApiObject, candidate: RouteCandidate) -> dict[str, Any]:
+def candidate_record(candidate: StepCandidate) -> dict[str, Any]:
     recipe = candidate.recipe
     recipe_record: dict[str, Any] | None = None
     if recipe is not None:
+        left_id = require_id(recipe["ingredient_a"])
+        right_id = require_id(recipe["ingredient_b"])
         recipe_record = {
             "operation": recipe.get("operation", "add"),
-            "ingredient_a_id": require_id(recipe["ingredient_a"]),
-            "ingredient_b_id": require_id(recipe["ingredient_b"]),
+            "ingredient_a_id": left_id,
+            "ingredient_b_id": right_id,
         }
+        if candidate.ingredient_candidates is not None:
+            left_candidate, right_candidate = candidate.ingredient_candidates
+            recipe_record["ingredient_a_steps"] = left_candidate.steps
+            recipe_record["ingredient_a_required_ids"] = sorted(left_candidate.required_ids)
+            recipe_record["ingredient_b_steps"] = right_candidate.steps
+            recipe_record["ingredient_b_required_ids"] = sorted(right_candidate.required_ids)
     return {
-        "id": require_id(obj),
-        "name": obj.get("name", ""),
-        "emoji": obj.get("emoji", ""),
-        "type": obj.get("type", ""),
-        "steps": len(candidate.required_ids),
+        "steps": candidate.steps,
         "required_ids": sorted(candidate.required_ids),
         "recipe": recipe_record,
     }
 
 
+def step_record(obj: ApiObject, candidates: tuple[StepCandidate, ...]) -> dict[str, Any]:
+    best = best_candidate(candidates)
+    best_record = candidate_record(best)
+    return {
+        "id": require_id(obj),
+        "name": obj.get("name", ""),
+        "emoji": obj.get("emoji", ""),
+        "type": obj.get("type", ""),
+        "steps": best_record["steps"],
+        "required_ids": best_record["required_ids"],
+        "recipe": best_record["recipe"],
+        "candidates": [candidate_record(candidate) for candidate in candidates],
+    }
+
+
+def collect_referenced_candidates(
+    object_id: int,
+    candidate: StepCandidate,
+    *,
+    details: dict[int, ApiObject],
+    records_by_id: dict[int, dict[tuple[int, tuple[int, ...]], StepCandidate]],
+) -> None:
+    key = (candidate.steps, tuple(sorted(candidate.required_ids)))
+    object_records = records_by_id.setdefault(object_id, {})
+    if key in object_records:
+        return
+    object_records[key] = candidate
+    if candidate.recipe is None or candidate.ingredient_candidates is None:
+        return
+    left_candidate, right_candidate = candidate.ingredient_candidates
+    left_id = require_id(candidate.recipe["ingredient_a"])
+    right_id = require_id(candidate.recipe["ingredient_b"])
+    if left_id in details:
+        collect_referenced_candidates(left_id, left_candidate, details=details, records_by_id=records_by_id)
+    if right_id in details:
+        collect_referenced_candidates(right_id, right_candidate, details=details, records_by_id=records_by_id)
+
+
 def build_output_payload(
     details: dict[int, ApiObject],
-    candidates_by_id: dict[int, tuple[RouteCandidate, ...]],
+    candidates_by_id: dict[int, tuple[StepCandidate, ...]],
     *,
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
 ) -> dict[str, Any]:
-    routes = {
-        str(object_id): route_record(details[object_id], best_candidate(candidates))
-        for object_id, candidates in sorted(candidates_by_id.items())
+    records_by_id: dict[int, dict[tuple[int, tuple[int, ...]], StepCandidate]] = {}
+    for object_id, candidates in candidates_by_id.items():
+        if object_id not in details:
+            continue
+        for candidate in candidates:
+            collect_referenced_candidates(object_id, candidate, details=details, records_by_id=records_by_id)
+
+    steps = {
+        str(object_id): step_record(
+            details[object_id],
+            tuple(sorted(records_by_id[object_id].values(), key=lambda item: (item.steps, len(item.required_ids), sorted(item.required_ids)))),
+        )
+        for object_id in sorted(records_by_id)
         if object_id in details
     }
     return {
@@ -285,8 +341,8 @@ def build_output_payload(
         "base_ids": sorted(base_ids),
         "base_names": sorted(base_names),
         "candidate_limit": candidate_limit,
-        "route_count": len(routes),
-        "routes": routes,
+        "step_count": len(steps),
+        "steps": steps,
     }
 
 
@@ -314,16 +370,16 @@ def self_test() -> None:
         "craft_sources": [{"operation": "add", "ingredient_a": steam, "ingredient_b": steam}],
     }
     details = {1: water, 2: fire, 10: steam, 11: engine}
-    routes = build_shortest_routes(
+    routes = build_shortest_steps(
         details,
         base_ids={1, 2},
         base_names={"水", "火"},
-        candidate_limit=16,
+        candidate_limit=8,
         max_iterations=10,
         show_progress=False,
     )
-    assert len(best_candidate(routes[10]).required_ids) == 1
-    assert len(best_candidate(routes[11]).required_ids) == 2
+    assert best_candidate(routes[10]).steps == 1
+    assert best_candidate(routes[11]).steps == 3
 
 
 def main() -> None:
@@ -345,7 +401,7 @@ def main() -> None:
         details = load_detail_cache(str(args.cache_dir))
         base_names = parse_name_set(str(args.base_names))
         base_ids = resolve_base_ids(details, base_ids=parse_int_set(str(args.base_ids)), base_names=base_names)
-        routes = build_shortest_routes(
+        routes = build_shortest_steps(
             details,
             base_ids=base_ids,
             base_names=base_names,
@@ -360,10 +416,10 @@ def main() -> None:
             base_names=base_names,
             candidate_limit=int(args.candidate_limit),
         )
-        output_path = str(args.output) if args.output else os.path.join(str(args.cache_dir), SHORTEST_ROUTES_FILE)
+        output_path = str(args.output) if args.output else os.path.join(str(args.cache_dir), SHORTEST_STEPS_FILE)
         write_json(output_path, payload)
         print(f"已写入：{output_path}")
-        print(f"基础可达对象：{payload['route_count']} / {len(details)}")
+        print(f"基础可达对象：{payload['step_count']} / {len(details)}")
     except RuntimeError as exc:
         fail(str(exc))
 
