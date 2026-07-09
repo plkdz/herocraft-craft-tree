@@ -3,17 +3,15 @@ from __future__ import annotations
 # 文件职责：命令行入口，负责解析参数、初始化客户端、调度合成树生成并写出结果文件。
 #
 # 常用命令：
-# python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
-# python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
+# python shortest_depth_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6
+# python shortest_depth_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6
 #
 # 并发参数：
 # --workers：外层并发；同一个物品有多条候选配方时，同时检查多条配方。
 # --deep-workers：递归内部并发；判断某条路线能不能回到水/火/土/风时，继续向深层并发查。
-# --request-limit：HTTP 总闸门；限制同时飞出去的请求总数，防止 workers * deep-workers 把接口打爆。
 # --branch-workers：单条配方 A/B 两个材料分支的并发数，最多有效值是 2。
 
 import argparse
-import concurrent.futures
 import html
 import os
 import sys
@@ -21,7 +19,6 @@ import time
 
 from herocraft_client import ClientConfig, HeroCraftClient
 from herocraft_core import (
-    BASE_URL,
     CACHE_DIR,
     DEFAULT_BASE_NAMES,
     DEFAULT_FORMAT,
@@ -29,7 +26,6 @@ from herocraft_core import (
     DEFAULT_MAX_DEPTH,
     DEFAULT_TYPE,
     RESULTS_DIR,
-    SESSION_FILE,
     ApiObject,
     BaseDepthCache,
     OutputFormat,
@@ -39,7 +35,6 @@ from herocraft_core import (
     format_object,
     is_base_object,
     iter_sources,
-    load_session_from_file,
     parse_int_set,
     parse_name_set,
     parse_type_filter,
@@ -47,7 +42,7 @@ from herocraft_core import (
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
 from herocraft_route import BaseRoutePlan, build_base_route_plan
-from herocraft_tree import build_html_document, build_tree_text
+from shortest_depth_render import build_html_document, build_tree_text
 
 
 def collect_unreachable_leaf_blockers(
@@ -126,19 +121,6 @@ def collect_unreachable_ids(
         and object_id in detail_snapshot
         and not is_base_object(detail_snapshot[object_id], base_ids=base_ids, base_names=base_names)
     }
-
-
-def refresh_object_details(client: HeroCraftClient, object_ids: set[int]) -> None:
-    ordered_ids = sorted(object_ids)
-    if not ordered_ids:
-        return
-    if client.max_workers <= 1 or len(ordered_ids) <= 1:
-        for object_id in ordered_ids:
-            client.refresh_object_detail(object_id)
-        return
-    worker_count = min(client.max_workers, len(ordered_ids))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        list(executor.map(client.refresh_object_detail, ordered_ids))
 
 
 def blocker_output_path(output_path: str) -> str:
@@ -547,7 +529,7 @@ def build_blocker_html_report(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="查询 HeroCraft 已发现物品的完整合成树")
+    parser = argparse.ArgumentParser(description="查询 HeroCraft 已发现物品的最短深度合成树")
     parser.add_argument(
         "item",
         nargs="?",
@@ -560,12 +542,6 @@ def parse_args() -> argparse.Namespace:
         default="",
         help=f"对象类型：元素、物品、装备、生物、概念；默认：{DEFAULT_TYPE}",
     )
-    parser.add_argument(
-        "--cookie",
-        default=os.environ.get("HEROCRAFT_SESSION", ""),
-        help=f"hc_session 的值；也可以用环境变量 HEROCRAFT_SESSION 或 {SESSION_FILE}",
-    )
-    parser.add_argument("--base-url", default=BASE_URL, help="API 基址")
     parser.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH, help="最大递归深度")
     parser.add_argument(
         "--no-global-dedupe",
@@ -585,11 +561,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=8, help="并发请求数量；设为 1 可关闭并发")
     parser.add_argument("--branch-workers", type=int, default=2, help="单条配方 A/B 分支并发数；设为 1 可关闭")
     parser.add_argument("--deep-workers", type=int, default=6, help="递归筛选内部并发数；设为 1 最稳")
-    parser.add_argument("--request-limit", type=int, default=0, help="同时 HTTP 请求上限；默认等于 --workers")
     parser.add_argument("--cache-dir", default=CACHE_DIR, help="本机缓存目录")
-    parser.add_argument("--refresh-cache", action="store_true", help="忽略本机缓存并重新请求")
-    parser.add_argument("--refresh-inventory", action="store_true", help="重新拉取当前账号已发现物品列表")
-    parser.add_argument("--refresh-unreachable", action="store_true", help="先按缓存找不可达链条，再只刷新底层阻塞点并重算")
     parser.add_argument("--show-id", action="store_true", help="在输出里显示对象 id")
     parser.add_argument(
         "--format",
@@ -615,7 +587,6 @@ def parse_args() -> argparse.Namespace:
         default=",".join(sorted(DEFAULT_BASE_NAMES)),
         help="作为尽头的基础元素名称，逗号分隔",
     )
-    parser.add_argument("--timeout", type=float, default=15.0, help="单次请求超时秒数")
     return parser.parse_args()
 
 def resolve_base_elements(
@@ -655,9 +626,6 @@ def main() -> None:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
-    if not cookie:
-        fail("缺少 cookie。传 --cookie 或设置 HEROCRAFT_SESSION 环境变量。")
     if args.max_depth < 1:
         fail("--max-depth 必须大于 0")
     if args.workers < 1:
@@ -672,21 +640,20 @@ def main() -> None:
         fail("--image-width 和 --image-height 必须大于 0")
     if args.show_all_sources and args.single_shortest_route:
         fail("--single-shortest-route 不能和 --show-all-sources 同时使用")
-    request_limit = int(args.request_limit) if int(args.request_limit) > 0 else int(args.workers)
-
     progress = ProgressStats(start_time=time.time())
     client = HeroCraftClient(
         ClientConfig(
-            base_url=str(args.base_url).rstrip("/"),
-            session_cookie=cookie,
-            timeout_seconds=float(args.timeout),
+            base_url="",
+            session_cookie="",
+            timeout_seconds=1.0,
             max_workers=int(args.workers),
             branch_workers=min(int(args.branch_workers), 2),
             deep_workers=int(args.deep_workers),
-            request_limit=request_limit,
+            request_limit=1,
             cache_dir=str(args.cache_dir),
-            refresh_cache=bool(args.refresh_cache),
-            refresh_inventory=bool(args.refresh_inventory),
+            refresh_cache=False,
+            refresh_inventory=False,
+            network_enabled=False,
         ),
         progress=progress,
     )
@@ -719,25 +686,6 @@ def main() -> None:
             base_names=base_names,
         )
         unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
-        if args.refresh_unreachable and unreachable_blockers:
-            blocker_ids = {require_id(obj) for obj in unreachable_blockers}
-            print(f"刷新不可达底层阻塞点详情：{len(blocker_ids)} 个", file=sys.stderr)
-            refresh_object_details(client, blocker_ids)
-            route_plan = build_base_route_plan(
-                client,
-                target,
-                max_depth=int(args.max_depth),
-                base_ids=base_ids,
-                base_names=base_names,
-            )
-            detail_snapshot = client.detail_cache_snapshot()
-            unreachable_ids = collect_unreachable_ids(
-                route_plan,
-                detail_snapshot,
-                base_ids=base_ids,
-                base_names=base_names,
-            )
-            unreachable_blockers = collect_unreachable_leaf_blockers(detail_snapshot, unreachable_ids)
         if output_format == "html":
             content = build_html_document(
                 client,

@@ -1,43 +1,38 @@
-# craft_tree.py
+# shortest_depth_tree.py
 
 文件职责：命令行入口，负责解析参数、初始化客户端、调度合成树生成并写出结果文件。
 
 常用命令：
 
 ```powershell
-python craft_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6 --request-limit 100
-python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100
-python craft_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --request-limit 100 --image
-python craft_tree.py 末日鱼雷 装备 --max-depth 999 --workers 20 --deep-workers 6 --request-limit 100 --single-shortest-route --image
-python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --refresh-unreachable
-python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable
-python craft_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --request-limit 100 --show-all-sources --refresh-unreachable --refresh-inventory
+python shortest_depth_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6
+python shortest_depth_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6
+python shortest_depth_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --image
+python shortest_depth_tree.py 末日鱼雷 装备 --max-depth 999 --workers 20 --deep-workers 6 --single-shortest-route --image
+python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6
+python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --show-all-sources
 ```
 
 参数要点：
 
 - 第一个位置参数是对象名称或 id。
 - 第二个位置参数是对象类型，可用 `元素`、`物品`、`装备`、`生物`、`概念`，不写时默认 `生物`。
-- `--cookie` 直接传 `hc_session`；不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session`。
-- `--base-url` 指定 API 基址。
+- 本命令只读本机缓存，不发网络请求；同步和刷新统一使用 `sync_cache.py`。
 - `--max-depth` 控制最大展开深度；默认最短深度算法会在这个深度内判断能否回到基础元素。
 - `--no-global-dedupe` 关闭全局去重，允许同一对象在不同线路重复展开。
 - `--show-all-sources` 显示全部已知配方；默认只显示基础可达的最短深度配方。
 - `--single-shortest-route` 只保留一条基础可达最短深度路线；默认仍使用全局去重保证速度，如需重复子树也完整展开，再加 `--no-global-dedupe`；不能和 `--show-all-sources` 同时使用。
-- `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发，`--request-limit` 控制 HTTP 总并发闸门。
+- `--workers` 控制外层并发，`--deep-workers` 控制递归判定并发。
 - `--branch-workers` 控制单条配方 A/B 两个材料分支并发，最多有效值是 2。
 - `--cache-dir` 指定本机缓存目录。
 - `--base-names` 默认是水、火、土、风；程序会先查真实对象 id，不硬编码 id。
 - `--base-ids` 额外指定作为尽头的基础元素 id，逗号分隔。
-- `--refresh-unreachable` 会先按缓存找不可达链条，再只刷新底层阻塞点并重算，适合外部新增配方后使用。
-- `--refresh-inventory` 才会重新拉取当前账号已发现物品列表。
-- `--refresh-cache` 会忽略本机缓存重新请求，范围最大，通常不用。
 - `--show-id` 会在输出里显示对象 id，排查同名对象时使用。
 - `--format` 指定输出格式，`html` 或 `text`，默认 `html`。
 - `--output` 指定输出文件路径。
 - `--image` 会把 HTML 自动全部展开后渲染成完整 PNG；可用 `--image-output` 指定图片路径。
 - `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸，不用于裁剪大图。
-- `--timeout` 指定单次请求超时秒数。
+- 缓存缺详情或物品栏时会直接报错，先运行 `python sync_cache.py --workers 100 --request-limit 1000`。
 
 输出逻辑：
 

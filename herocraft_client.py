@@ -36,6 +36,7 @@ class ClientConfig:
     cache_dir: str
     refresh_cache: bool
     refresh_inventory: bool
+    network_enabled: bool = True
 
 class HeroCraftClient:
     def __init__(self, config: ClientConfig, progress: ProgressStats | None = None) -> None:
@@ -168,6 +169,8 @@ class HeroCraftClient:
         return json.loads(body)
 
     def request_json(self, path: str) -> Any:
+        if not self._config.network_enabled:
+            raise RuntimeError(f"当前命令只读本机缓存，禁止网络请求：{path}。请先运行 sync_cache.py")
         try:
             with self._request_semaphore:
                 return self._request_json_keep_alive(path)
@@ -221,6 +224,8 @@ class HeroCraftClient:
     def my_objects(self) -> list[ApiObject]:
         if self._mine_cache is not None:
             return self._mine_cache
+        if not self._config.network_enabled:
+            raise RuntimeError("缺少本机物品栏缓存。请先运行 sync_cache.py")
 
         limit = 500
         def fetch_page(offset: int) -> ObjectPage:

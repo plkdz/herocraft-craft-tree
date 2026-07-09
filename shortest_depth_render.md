@@ -1,6 +1,6 @@
-# herocraft_tree.py
+# shortest_depth_render.py
 
-文件职责：只负责 text/html 合成树渲染和渲染期剪枝；路线算法在 `herocraft_route.py`。
+文件职责：组装最短深度树的 text/html 输出；通用 HTML 节点渲染在 `tree_html_render.py`，路线算法在 `herocraft_route.py`。
 
 剪枝规则：
 
@@ -18,12 +18,9 @@ HTML 交互：
 - 右键拖动平移，滚轮缩放。
 - 重置视角会恢复 100% 缩放，并把根节点卡片居中。
 - 全部展开和全部折叠后会自动重置视角。
-- 配方主干线和 A/B 分支线按实际卡片位置动态计算，展开折叠后自动重算。
-- 配方外层大框已移除，只保留卡片、徽标、线条和节点。
-- 不再显示“直接接入基础配方”和“没有直接接入基础元素的配方”这类低价值提示。
 
 渲染入口：
 
 - `build_tree_text()`：输出文本树。
-- `build_tree_html_node()`：递归生成单个 HTML 节点。
-- `build_html_document()`：生成完整 HTML 页面。
+- `build_tree_html_node()`：递归组装通用 `HtmlTreeNode`。
+- `build_html_document()`：生成完整 HTML 页面，底层调用 `tree_html_render.py`。

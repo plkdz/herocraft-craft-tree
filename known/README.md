@@ -9,4 +9,4 @@
 - `HeroCraft_files/index-CQ44si34.js`：当前保存的前端脚本。
 - `HeroCraft_files/index-g02M3tZn.css`：当前保存的前端样式。
 
-这些文件不是运行 `craft_tree.py` 的必要依赖；程序查询 API 和渲染结果不读取这里。
+这些文件不是运行 `shortest_depth_tree.py` 的必要依赖；程序查询 API 和渲染结果不读取这里。

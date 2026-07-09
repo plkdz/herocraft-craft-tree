@@ -12,6 +12,7 @@
 
 - `ClientConfig`：API 基址、会话、超时、并发和缓存参数。
 - `HeroCraftClient`：对外提供请求、缓存、对象解析能力。
+- `network_enabled=False` 时只读本机缓存；缓存缺失会报错，不会自动请求 API。`shortest_depth_tree.py` 使用这个模式。
 
 关键方法：
 
