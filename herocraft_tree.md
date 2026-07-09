@@ -1,22 +1,13 @@
 # herocraft_tree.py
 
-文件职责：构建合成路线计划，筛选基础可达最短配方，并渲染 text/html 合成树。
-
-算法结构：
-
-- `BaseRoutePlan` 保存动态规划结果：
-  - `depths`：对象 id 到基础可达最短深度。
-  - `object_ids`：本次从目标向下展开过的对象 id。
-- `build_base_route_plan()` 从目标反向批量补全配方图，再计算基础可达深度。
-- `compute_base_depths()` 使用动态规划迭代。基础元素深度为 0，一个配方深度是两个材料深度最大值加 1。
-- `source_depth_from_plan()` 用动态规划结果快速判断单条配方能否由基础元素合成。
+文件职责：只负责 text/html 合成树渲染和渲染期剪枝；路线算法在 `herocraft_route.py`。
 
 剪枝规则：
 
 - 如果某条路线会回到当前路径已有对象，标记为剪枝，避免自循环。
 - 默认全局同一对象只展开一次，避免大树重复爆炸。
-- 默认只显示基础可达的最短配方；`--show-all-sources` 可显示全部配方。
-- `--single-shortest-route` 会在每个节点只保留一条基础可达最短配方；默认仍使用全局去重保证速度，如需重复子树也完整展开，可加 `--no-global-dedupe`。
+- 默认只显示基础可达的最短深度配方；`--show-all-sources` 可显示全部配方。
+- `--single-shortest-route` 会在每个节点只保留一条基础可达最短深度配方；默认仍使用全局去重保证速度，如需重复子树也完整展开，可加 `--no-global-dedupe`。
 
 HTML 交互：
 

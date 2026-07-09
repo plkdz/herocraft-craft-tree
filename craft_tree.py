@@ -46,7 +46,8 @@ from herocraft_core import (
     require_id,
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
-from herocraft_tree import BaseRoutePlan, build_base_route_plan, build_html_document, build_tree_text
+from herocraft_route import BaseRoutePlan, build_base_route_plan
+from herocraft_tree import build_html_document, build_tree_text
 
 
 def collect_unreachable_leaf_blockers(
@@ -574,7 +575,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--show-all-sources",
         action="store_true",
-        help="显示全部已知配方；默认只显示基础可达的最短配方",
+        help="显示全部已知配方；默认只显示基础可达的最短深度配方",
     )
     parser.add_argument(
         "--single-shortest-route",
@@ -803,9 +804,9 @@ def main() -> None:
                 print(f"基础合成路线：已找到，最短深度 {base_route_depth}", file=sys.stderr)
             if shortest_base_only:
                 if single_shortest_route:
-                    print("配方显示：只显示一条基础可达最短路线；如需重复子树也完整展开，加 --no-global-dedupe", file=sys.stderr)
+                    print("配方显示：只显示一条基础可达最短深度路线；如需重复子树也完整展开，加 --no-global-dedupe", file=sys.stderr)
                 else:
-                    print("配方显示：只显示基础可达的最短配方；如需全部配方，加 --show-all-sources", file=sys.stderr)
+                    print("配方显示：只显示基础可达的最短深度配方；如需全部配方，加 --show-all-sources", file=sys.stderr)
             else:
                 print("配方显示：全部已知配方", file=sys.stderr)
             if scored_blockers:

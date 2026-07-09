@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-# 文件职责：构建合成路线计划，筛选基础可达最短配方，并渲染 text/html 合成树。
+# 文件职责：渲染 HeroCraft text/html 合成树；路线算法在 herocraft_route.py。
 
-import concurrent.futures
 import html
-from dataclasses import dataclass
+import concurrent.futures
 
 from herocraft_client import HeroCraftClient
 from herocraft_core import (
@@ -17,340 +16,7 @@ from herocraft_core import (
     iter_sources,
     require_id,
 )
-
-
-@dataclass(frozen=True)
-class BaseRoutePlan:
-    depths: dict[int, int]
-    object_ids: set[int]
-
-
-def source_depth_from_plan(
-    source: CraftSource,
-    *,
-    base_ids: set[int],
-    base_names: set[str],
-    route_plan: BaseRoutePlan,
-) -> int | None:
-    ingredient_depths: list[int] = []
-    for ingredient in (source["ingredient_a"], source["ingredient_b"]):
-        if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
-            ingredient_depths.append(0)
-            continue
-        depth = route_plan.depths.get(require_id(ingredient))
-        if depth is None:
-            return None
-        ingredient_depths.append(depth)
-    return 1 + max(ingredient_depths)
-
-
-def source_depth_from_depths(
-    source: CraftSource,
-    *,
-    base_ids: set[int],
-    base_names: set[str],
-    depths: dict[int, int],
-) -> int | None:
-    ingredient_depths: list[int] = []
-    for ingredient in (source["ingredient_a"], source["ingredient_b"]):
-        if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
-            ingredient_depths.append(0)
-            continue
-        depth = depths.get(require_id(ingredient))
-        if depth is None:
-            return None
-        ingredient_depths.append(depth)
-    return 1 + max(ingredient_depths)
-
-
-def build_base_route_plan(
-    client: HeroCraftClient,
-    target: ApiObject,
-    *,
-    max_depth: int,
-    base_ids: set[int],
-    base_names: set[str],
-) -> BaseRoutePlan:
-    if client._progress is not None:
-        client._progress.phase = "批量补全配方图"
-        client._progress.report()
-
-    target_id = require_id(target)
-    frontier: dict[int, int] = {target_id: max_depth}
-    seen_remaining: dict[int, int] = {}
-
-    while frontier:
-        object_ids = list(frontier)
-        if client.max_workers <= 1 or len(object_ids) <= 1:
-            for object_id in object_ids:
-                client.object_detail(object_id)
-        else:
-            worker_count = min(client.max_workers, len(object_ids))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-                list(executor.map(client.object_detail, object_ids))
-
-        details = client.detail_cache_snapshot()
-        route_plan = BaseRoutePlan(
-            compute_base_depths(details, max_depth=max_depth, base_ids=base_ids, base_names=base_names),
-            set(seen_remaining) | set(frontier),
-        )
-        if target_id in route_plan.depths:
-            return route_plan
-
-        next_frontier: dict[int, int] = {}
-        for object_id, remaining_depth in frontier.items():
-            previous_remaining = seen_remaining.get(object_id, -1)
-            if remaining_depth <= previous_remaining:
-                continue
-            seen_remaining[object_id] = remaining_depth
-            if remaining_depth <= 0:
-                continue
-
-            detail = details.get(object_id)
-            if detail is None:
-                continue
-            for source in iter_sources(detail):
-                for ingredient in (source["ingredient_a"], source["ingredient_b"]):
-                    if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
-                        continue
-                    ingredient_id = require_id(ingredient)
-                    next_remaining = remaining_depth - 1
-                    if next_remaining > seen_remaining.get(ingredient_id, -1):
-                        next_frontier[ingredient_id] = max(next_frontier.get(ingredient_id, -1), next_remaining)
-        frontier = next_frontier
-
-    if client._progress is not None:
-        client._progress.phase = "动态规划最短路线"
-        client._progress.report()
-
-    details = client.detail_cache_snapshot()
-    return BaseRoutePlan(
-        compute_base_depths(details, max_depth=max_depth, base_ids=base_ids, base_names=base_names),
-        set(seen_remaining),
-    )
-
-
-def compute_base_depths(
-    details: dict[int, ApiObject],
-    *,
-    max_depth: int,
-    base_ids: set[int],
-    base_names: set[str],
-) -> dict[int, int]:
-    depths: dict[int, int] = {object_id: 0 for object_id in base_ids}
-    for _ in range(max_depth):
-        previous_depths = dict(depths)
-        next_depths = dict(depths)
-        changed = False
-        for object_id, detail in details.items():
-            best_depth = previous_depths.get(object_id)
-            for source in iter_sources(detail):
-                source_depth = source_depth_from_depths(
-                    source,
-                    base_ids=base_ids,
-                    base_names=base_names,
-                    depths=previous_depths,
-                )
-                if source_depth is None:
-                    continue
-                if best_depth is None or source_depth < best_depth:
-                    best_depth = source_depth
-            if best_depth is not None and best_depth != previous_depths.get(object_id):
-                next_depths[object_id] = best_depth
-                changed = True
-        depths = next_depths
-        if not changed:
-            break
-    return depths
-
-
-def source_base_depth(
-    client: HeroCraftClient,
-    source: CraftSource,
-    *,
-    base_ids: set[int],
-    base_names: set[str],
-    cache: BaseDepthCache,
-    visiting: set[int],
-    remaining_depth: int,
-) -> int | None:
-    if remaining_depth <= 0:
-        return None
-
-    def ingredient_depth(ingredient: ApiObject) -> int | None:
-        return object_base_depth(
-            client,
-            ingredient,
-            base_ids=base_ids,
-            base_names=base_names,
-            cache=cache,
-            visiting=set(visiting),
-            remaining_depth=remaining_depth - 1,
-        )
-
-    if client.branch_workers <= 1:
-        depth_a = ingredient_depth(source["ingredient_a"])
-        depth_b = ingredient_depth(source["ingredient_b"])
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            depth_a_future = executor.submit(ingredient_depth, source["ingredient_a"])
-            depth_b_future = executor.submit(ingredient_depth, source["ingredient_b"])
-            depth_a = depth_a_future.result()
-            depth_b = depth_b_future.result()
-
-    if depth_a is None or depth_b is None:
-        return None
-    return 1 + max(depth_a, depth_b)
-
-
-def object_base_depth(
-    client: HeroCraftClient,
-    obj: ApiObject,
-    *,
-    base_ids: set[int],
-    base_names: set[str],
-    cache: BaseDepthCache,
-    visiting: set[int],
-    remaining_depth: int,
-) -> int | None:
-    object_id = require_id(obj)
-    if is_base_object(obj, base_ids=base_ids, base_names=base_names):
-        return 0
-    if remaining_depth <= 0:
-        return None
-    cache_key = (object_id, remaining_depth)
-    with client._base_depth_cache_lock:
-        if cache_key in cache:
-            return cache[cache_key]
-    if object_id in visiting:
-        return None
-
-    visiting.add(object_id)
-    best_depth: int | None = None
-    try:
-        detail = client.object_detail(object_id)
-        sources = list(iter_sources(detail))
-        if any(
-            is_base_object(source["ingredient_a"], base_ids=base_ids, base_names=base_names)
-            and is_base_object(source["ingredient_b"], base_ids=base_ids, base_names=base_names)
-            for source in sources
-        ):
-            best_depth = 1
-            with client._base_depth_cache_lock:
-                cache[cache_key] = best_depth
-            return best_depth
-        for _, depth in collect_source_depths(
-            client,
-            sources,
-            base_ids=base_ids,
-            base_names=base_names,
-            cache=cache,
-            visiting=visiting,
-            remaining_depth=remaining_depth,
-            worker_limit=client.deep_workers,
-        ):
-            if depth is not None and (best_depth is None or depth < best_depth):
-                best_depth = depth
-    except RuntimeError:
-        best_depth = None
-    finally:
-        visiting.remove(object_id)
-
-    with client._base_depth_cache_lock:
-        cache[cache_key] = best_depth
-    return best_depth
-
-
-def collect_source_depths(
-    client: HeroCraftClient,
-    sources: list[CraftSource],
-    *,
-    base_ids: set[int],
-    base_names: set[str],
-    cache: BaseDepthCache,
-    visiting: set[int],
-    remaining_depth: int,
-    worker_limit: int | None = None,
-) -> list[tuple[CraftSource, int | None]]:
-    def find_depth(source: CraftSource) -> tuple[CraftSource, int | None]:
-        return source, source_base_depth(
-            client,
-            source,
-            base_ids=base_ids,
-            base_names=base_names,
-            cache=cache,
-            visiting=set(visiting),
-            remaining_depth=remaining_depth,
-        )
-
-    max_workers = client.max_workers if worker_limit is None else worker_limit
-    if max_workers <= 1 or len(sources) <= 1:
-        return [find_depth(source) for source in sources]
-
-    worker_count = min(max_workers, len(sources))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        return list(executor.map(find_depth, sources))
-
-
-def filter_shortest_base_sources(
-    client: HeroCraftClient,
-    sources: list[CraftSource],
-    *,
-    base_ids: set[int],
-    base_names: set[str],
-    cache: BaseDepthCache,
-    remaining_depth: int,
-    single_shortest_route: bool,
-    route_plan: BaseRoutePlan | None = None,
-) -> tuple[list[CraftSource], int | None, int]:
-    if client._progress is not None:
-        client._progress.phase = "筛选最短基础路线"
-        client._progress.recipes_checked += len(sources)
-        client._progress.report()
-    direct_base_sources = [
-        source
-        for source in sources
-        if is_base_object(source["ingredient_a"], base_ids=base_ids, base_names=base_names)
-        and is_base_object(source["ingredient_b"], base_ids=base_ids, base_names=base_names)
-    ]
-    if direct_base_sources:
-        if single_shortest_route:
-            return direct_base_sources[:1], 1, len(direct_base_sources)
-        return direct_base_sources, 1, len(direct_base_sources)
-
-    source_depths: list[tuple[CraftSource, int]] = []
-    if route_plan is not None:
-        for source in sources:
-            depth = source_depth_from_plan(
-                source,
-                base_ids=base_ids,
-                base_names=base_names,
-                route_plan=route_plan,
-            )
-            if depth is not None:
-                source_depths.append((source, depth))
-    else:
-        results = collect_source_depths(
-            client,
-            sources,
-            base_ids=base_ids,
-            base_names=base_names,
-            cache=cache,
-            visiting=set(),
-            remaining_depth=remaining_depth,
-        )
-        for source, depth in results:
-            if depth is not None:
-                source_depths.append((source, depth))
-
-    if not source_depths:
-        return sources, None, 0
-
-    shortest_depth = min(depth for _, depth in source_depths)
-    shortest_sources = [source for source, depth in source_depths if depth == shortest_depth]
-    if single_shortest_route:
-        shortest_sources = shortest_sources[:1]
-    return shortest_sources, shortest_depth, len(source_depths)
+from herocraft_route import BaseRoutePlan, filter_shortest_base_sources, source_base_depth, source_depth_from_plan
 
 
 def prefetch_source_ingredients(
@@ -459,7 +125,7 @@ def build_tree_text(
 
     if shortest_base_depth_value is not None:
         lines.append(
-            f"{prefix}  [提示] 已只显示基础可达最短配方：{len(sources)}/{original_source_count} 条，深度 {shortest_base_depth_value}"
+            f"{prefix}  [提示] 已只显示基础可达最短深度配方：{len(sources)}/{original_source_count} 条，深度 {shortest_base_depth_value}"
         )
     elif shortest_base_only:
         lines.append(f"{prefix}  [提示] 没有基础可达配方，保留全部 {original_source_count} 条")
@@ -608,6 +274,15 @@ def build_tree_html_node(
     state_class = ""
     notes: list[str] = []
     recipes: list[str] = []
+    shortest_base_depth_value: int | None = None
+    if route_plan is not None:
+        route_depth = route_plan.depths.get(object_id)
+        if route_depth is not None:
+            notes.append(f"基础可达：最短深度 {route_depth}")
+        elif is_base_object(obj, base_ids=base_ids, base_names=base_names):
+            notes.append("基础可达：最短深度 0")
+        else:
+            notes.append("基础不可达")
 
     if object_id in path:
         state_class = " pruned"
@@ -642,7 +317,6 @@ def build_tree_html_node(
 
         next_path = (*path, object_id)
         if sources:
-            shortest_base_depth_value: int | None = None
             original_source_count = len(sources)
             if shortest_base_only:
                 sources, shortest_base_depth_value, _ = filter_shortest_base_sources(
@@ -656,9 +330,22 @@ def build_tree_html_node(
                     route_plan=route_plan,
                 )
             if shortest_base_depth_value is not None:
-                notes.append(f"已只显示基础可达最短配方：{len(sources)}/{original_source_count} 条，深度 {shortest_base_depth_value}")
+                notes.append(f"已只显示基础可达最短深度配方：{len(sources)}/{original_source_count} 条，深度 {shortest_base_depth_value}")
             elif shortest_base_only:
                 notes.append(f"没有基础可达配方，保留全部 {original_source_count} 条")
+            elif route_plan is not None:
+                source_depth_values = [
+                    source_depth_from_plan(
+                        source,
+                        base_ids=base_ids,
+                        base_names=base_names,
+                        route_plan=route_plan,
+                    )
+                    for source in sources
+                ]
+                reachable_depth_values = [depth for depth in source_depth_values if depth is not None]
+                if reachable_depth_values:
+                    shortest_base_depth_value = min(reachable_depth_values)
 
             prefetch_source_ingredients(
                 client,
@@ -700,7 +387,10 @@ def build_tree_html_node(
                 )
             is_base_reachable = base_depth is not None
             recipe_class = "recipe base-recipe" if is_base_reachable else "recipe"
+            is_shortest = base_depth is not None and base_depth == shortest_base_depth_value
             badge_html = '<span class="base-badge">基础可达</span>' if is_base_reachable else ""
+            if is_shortest:
+                badge_html += '<span class="shortest-badge">最短</span>'
             if any(ingredient_id in next_path for ingredient_id in ingredient_ids):
                 recipes.append(
                     f"<div class=\"{recipe_class} pruned-source\">"
@@ -747,6 +437,14 @@ def build_html_document(
     route_plan: BaseRoutePlan | None,
 ) -> str:
     title = f"合成树 - {format_object(target, show_id=show_id)}"
+    route_summary = ""
+    if route_plan is not None:
+        target_id = require_id(target)
+        route_depth = route_plan.depths.get(target_id)
+        if route_depth is not None:
+            route_summary = f"<p class=\"route-summary\">基础合成路线：已找到，最短深度 {route_depth}</p>"
+        else:
+            route_summary = f"<p class=\"route-summary unreachable\">基础合成路线：未在深度 {max_depth} 内找到</p>"
     body = build_tree_html_node(
         client,
         target,
@@ -776,6 +474,15 @@ def build_html_document(
       color: #1f2933;
     }}
     h1 {{ margin: 0 0 16px; font-size: 22px; }}
+    .route-summary {{
+      margin: -6px 0 12px;
+      color: #315f4d;
+      font-size: 14px;
+      font-weight: 700;
+    }}
+    .route-summary.unreachable {{
+      color: #9a3f2d;
+    }}
     .toolbar {{
       position: sticky;
       top: 0;
@@ -975,6 +682,19 @@ def build_html_document(
       font-size: 12px;
       font-weight: 700;
     }}
+    .shortest-badge {{
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 20px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #1f5f99;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }}
     .ingredient-pair {{
       position: relative;
       display: flex;
@@ -1053,6 +773,7 @@ def build_html_document(
 </head>
 <body>
   <h1>{html.escape(title)}</h1>
+  {route_summary}
   <div class="toolbar">
     <button onclick="setAllDetails(true)">全部展开</button>
     <button onclick="setAllDetails(false)">全部折叠</button>
