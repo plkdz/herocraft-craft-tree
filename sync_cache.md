@@ -5,8 +5,8 @@
 常用命令：
 
 ```powershell
-python sync_cache.py --workers 100 --request-limit 1000
-python sync_cache.py --missing-only --workers 100 --request-limit 1000
+python sync_cache.py --workers 200 --request-limit 1000
+python sync_cache.py --missing-only --workers 200 --request-limit 1000
 ```
 
 同步逻辑：
