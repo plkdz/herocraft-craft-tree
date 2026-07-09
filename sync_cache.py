@@ -11,6 +11,7 @@ import concurrent.futures
 import os
 import sys
 import time
+from dataclasses import dataclass
 
 from herocraft_client import ClientConfig, HeroCraftClient
 from herocraft_core import (
@@ -23,6 +24,12 @@ from herocraft_core import (
     load_session_from_file,
     require_id,
 )
+
+
+@dataclass(frozen=True)
+class DetailFailure:
+    object_id: int
+    message: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,14 +65,44 @@ def missing_detail_ids(client: HeroCraftClient, object_ids: list[int]) -> list[i
     return [object_id for object_id in object_ids if object_id not in cached_ids]
 
 
-def refresh_details(client: HeroCraftClient, object_ids: list[int]) -> None:
+def refresh_one_detail(client: HeroCraftClient, object_id: int) -> DetailFailure | None:
+    try:
+        client.refresh_object_detail(object_id)
+    except Exception as exc:
+        return DetailFailure(object_id=object_id, message=str(exc))
+    return None
+
+
+def refresh_detail_round(client: HeroCraftClient, object_ids: list[int]) -> list[DetailFailure]:
     if client.max_workers <= 1 or len(object_ids) <= 1:
+        failures: list[DetailFailure] = []
         for object_id in object_ids:
-            client.refresh_object_detail(object_id)
-        return
+            failure = refresh_one_detail(client, object_id)
+            if failure is not None:
+                failures.append(failure)
+        return failures
     worker_count = min(client.max_workers, len(object_ids))
+    failures: list[DetailFailure] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        list(executor.map(client.refresh_object_detail, object_ids))
+        futures = [executor.submit(refresh_one_detail, client, object_id) for object_id in object_ids]
+        for future in concurrent.futures.as_completed(futures):
+            failure = future.result()
+            if failure is not None:
+                failures.append(failure)
+    return failures
+
+
+def refresh_details(client: HeroCraftClient, object_ids: list[int], *, retry_rounds: int = 3) -> list[DetailFailure]:
+    retry_ids = object_ids
+    failures: list[DetailFailure] = []
+    for round_index in range(1, retry_rounds + 1):
+        if not retry_ids:
+            return []
+        failures = refresh_detail_round(client, retry_ids)
+        retry_ids = [failure.object_id for failure in failures]
+        if failures and round_index < retry_rounds:
+            print(f"\n第 {round_index} 轮详情失败：{len(failures)} 个，开始重试", file=sys.stderr)
+    return failures
 
 
 def main() -> None:
@@ -109,9 +146,13 @@ def main() -> None:
             object_ids = missing_detail_ids(client, object_ids)
         print(f"\n物品栏对象：{len(inventory)} 个；去重后详情请求：{len(object_ids)} 个", file=sys.stderr)
         progress.phase = "同步对象详情"
-        refresh_details(client, object_ids)
+        failures = refresh_details(client, object_ids)
         client.save_cache()
         progress.finish()
+        if failures:
+            preview = "；".join(f"#{failure.object_id}: {failure.message}" for failure in failures[:10])
+            suffix = "..." if len(failures) > 10 else ""
+            print(f"详情同步失败：{len(failures)} 个。{preview}{suffix}", file=sys.stderr)
         print(f"缓存已同步：{args.cache_dir}", file=sys.stderr)
     except Exception:
         client.save_cache()
