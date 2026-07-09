@@ -12,7 +12,7 @@
 
 - 只在当前 PowerShell 窗口生效，关闭窗口后失效。
 - 不写入注册表、不修改环境变量、不修改 PowerShell Profile。
-- 目前补全 `python craft_tree.py --`、`py craft_tree.py --`、`python sync_cache.py --` 和 `py sync_cache.py --` 的参数名。
+- 目前补全 `python craft_tree.py --`、`python sync_cache.py --`、`python build_shortest_routes.py --`、`python shortest_route_tree.py --` 及对应 `py` 命令的参数名。
 
 入口逻辑：
 

@@ -36,6 +36,26 @@ $script:HeroCraftOptionMap = @{
         "--timeout",
         "--missing-only"
     )
+    "build_shortest_routes.py" = @(
+        "--cache-dir",
+        "--output",
+        "--base-ids",
+        "--base-names",
+        "--candidate-limit",
+        "--max-iterations",
+        "--self-test"
+    )
+    "shortest_route_tree.py" = @(
+        "--cache-dir",
+        "--routes",
+        "--show-id",
+        "--format",
+        "--output",
+        "--image",
+        "--image-output",
+        "--image-width",
+        "--image-height"
+    )
 }
 
 Register-ArgumentCompleter -Native -CommandName python, py -ScriptBlock {
