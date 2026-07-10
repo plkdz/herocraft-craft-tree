@@ -14,8 +14,8 @@ python build_shortest_steps.py --self-test
 
 - 默认写入 `.herocraft_cache/shortest_steps.json`。
 - 每个可达对象记录步数最少线路：`steps`、`required_ids`、候选路线和当前选中的直接 `recipe`。
-- `steps` 按递归合成次数计算：基础元素为 `0`，普通配方为 `A.steps + B.steps + 1`。
-- `required_ids` 只用于候选去重和回查子路线，不再作为 `steps` 的定义。
+- `steps` 按“需要合成的非基础产物数量”计算，同一个中间物只算一次。
+- `required_ids` 是 `steps` 的来源，也用于候选去重和回查子路线。
 
 参数要点：
 
@@ -34,7 +34,7 @@ python build_shortest_steps.py --self-test
 - 算法从基础元素开始做离线传播：某个对象的路线变好后，只重新检查依赖它的配方，不再每轮全量扫描所有配方。
 - 每个对象最多保留 `--candidate-limit` 条非支配候选路线，避免空间爆炸。
 - `--candidate-limit 1` 最快；`4` 通常很快，默认 `8` 更保守也更慢。
-- 输出时会补齐被父路线引用到的子候选闭包，保证查询树里每个节点都能按 `A.steps + B.steps + 1` 展开。
+- 输出时会补齐被父路线引用到的子候选闭包，保证查询树和顺序表使用同一条候选路线。
 - 如果外部同步了新物品或新配方，先运行 `sync_cache.py`，再重新运行本脚本。
 
 关键函数：

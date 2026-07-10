@@ -140,10 +140,11 @@ def source_candidates(
     candidates: list[StepCandidate] = []
     for left in options[0]:
         for right in options[1]:
+            required_ids = frozenset({result_id}) | left.required_ids | right.required_ids
             candidates.append(
                 StepCandidate(
-                    steps=left.steps + right.steps + 1,
-                    required_ids=frozenset({result_id}) | left.required_ids | right.required_ids,
+                    steps=len(required_ids),
+                    required_ids=required_ids,
                     recipe=source,
                     ingredient_candidates=(left, right),
                 )
@@ -379,14 +380,16 @@ def self_test() -> None:
         show_progress=False,
     )
     assert best_candidate(routes[10]).steps == 1
-    assert best_candidate(routes[11]).steps == 3
+    assert best_candidate(routes[11]).steps == 2
 
 
 def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if stdout_reconfigure is not None:
+        stdout_reconfigure(encoding="utf-8", errors="replace")
+    stderr_reconfigure = getattr(sys.stderr, "reconfigure", None)
+    if stderr_reconfigure is not None:
+        stderr_reconfigure(encoding="utf-8", errors="replace")
     args = parse_args()
     if args.candidate_limit < 1:
         fail("--candidate-limit 必须大于 0")
