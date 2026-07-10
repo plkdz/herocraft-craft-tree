@@ -25,6 +25,7 @@ from herocraft_core import (
     require_id,
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
+from shortest_steps_order_render import build_order_html_document, order_output_path_for, render_order_text
 from shortest_steps_render import build_html_document, output_path_for, render_steps_tree_text
 
 
@@ -82,8 +83,9 @@ def resolve_cached_object(query: str, item_type: str, details: dict[int, ApiObje
 
 
 def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if stdout_reconfigure is not None:
+        stdout_reconfigure(encoding="utf-8", errors="replace")
     args = parse_args()
     try:
         details = load_detail_cache(str(args.cache_dir))
@@ -100,6 +102,8 @@ def main() -> None:
                 f"目标：{format_object(target, show_id=args.show_id)}\n"
                 f"最少步数：{step.get('steps')}\n\n"
                 + "\n".join(render_steps_tree_text(target_id, details=details, steps_table=steps_table, show_id=bool(args.show_id)))
+                + "\n\n合成顺序：\n"
+                + "\n".join(render_order_text(target_id, details=details, steps_table=steps_table, show_id=bool(args.show_id)))
                 + "\n"
             )
         else:
@@ -112,18 +116,38 @@ def main() -> None:
         print(f"最少步数：{step.get('steps')}")
         print(f"已写入：{output_path}")
 
+        order_path = ""
+        if output_format == "html":
+            order_path = order_output_path_for(output_path)
+            with open(order_path, "w", encoding="utf-8") as file:
+                file.write(build_order_html_document(target, details=details, steps_table=steps_table, show_id=bool(args.show_id)))
+            print(f"已写入顺序表：{order_path}")
+
         if args.image:
             if output_format != "html":
                 fail("--image 只能配合 --format html 使用")
             expanded_html_path = write_expanded_html_for_image(output_path)
             image_path = str(args.image_output) if args.image_output else image_output_path(output_path)
-            render_html_image(
-                expanded_html_path,
-                image_path,
-                width=int(args.image_width),
-                height=int(args.image_height),
-            )
+            try:
+                render_html_image(
+                    expanded_html_path,
+                    image_path,
+                    width=int(args.image_width),
+                    height=int(args.image_height),
+                )
+            finally:
+                if os.path.exists(expanded_html_path):
+                    os.remove(expanded_html_path)
             print(f"已写入图片：{image_path}")
+            if order_path:
+                order_image_path = image_output_path(order_path)
+                render_html_image(
+                    order_path,
+                    order_image_path,
+                    width=int(args.image_width),
+                    height=int(args.image_height),
+                )
+                print(f"已写入顺序表图片：{order_image_path}")
     except RuntimeError as exc:
         fail(str(exc))
 

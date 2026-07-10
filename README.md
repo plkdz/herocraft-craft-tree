@@ -58,7 +58,7 @@ python shortest_steps_tree.py 蒸汽 元素 --image
 
 本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。`shortest_depth_tree.py` 只读本机缓存，不发网络请求；外部配方或物品栏可能更新时，统一用 `sync_cache.py` 全量同步缓存：它会重新拉取已发现物品列表，并对去重后的每个对象 id 请求一次详情。需要刷新持久化最少步数表时，再运行 `python build_shortest_steps.py`，输出 `.herocraft_cache/shortest_steps.json`。
 
-最少步数树由 `shortest_steps_tree.py` 查询，使用 `build_shortest_steps.py` 预生成的持久化表；步数按递归合成次数计算，基础元素为 `0`，普通配方为 `A.steps + B.steps + 1`。
+最少步数树由 `shortest_steps_tree.py` 查询，使用 `build_shortest_steps.py` 预生成的持久化表；步数按需要合成的非基础产物数量计算，同一个中间物只算一次。查询最少步数 HTML 时会保留旧树状图，并额外生成 `_order.html` 合成顺序表；加 `--image` 时也会额外生成 `_order.png`。
 
 常用参数：
 
@@ -93,6 +93,7 @@ python shortest_steps_tree.py 蒸汽 元素 --image
 - [build_shortest_steps.md](build_shortest_steps.md)：离线生成最少合成步数表。
 - [shortest_steps_tree.md](shortest_steps_tree.md)：查询持久化最少步数合成树。
 - [shortest_steps_render.md](shortest_steps_render.md)：渲染持久化最少步数树的 text/html 输出。
+- [shortest_steps_order_render.md](shortest_steps_order_render.md)：渲染最少步数路线的合成顺序 HTML。
 - [tree_html_render.md](tree_html_render.md)：统一横向 HTML 树节点、页面和交互渲染。
 - [herocraft_core.md](herocraft_core.md)：共享类型、常量、格式化和进度统计。
 - [herocraft_client.md](herocraft_client.md)：HTTP API、缓存、对象解析。
