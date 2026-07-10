@@ -275,11 +275,13 @@ def render_html_image(html_path: str, image_path: str, *, width: int, height: in
                     {
                         "expression": """
 (async () => {
-  setAllDetails(true);
+  if (typeof setAllDetails === "function") {
+    setAllDetails(true);
+  }
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const viewport = document.getElementById("viewport");
   const canvas = document.getElementById("treeCanvas");
-  if (viewport) {
+  if (viewport && canvas) {
     viewport.style.width = "max-content";
     viewport.style.height = "auto";
     viewport.style.overflow = "visible";
@@ -287,16 +289,30 @@ def render_html_image(html_path: str, image_path: str, *, width: int, height: in
   }
   if (canvas) {
     canvas.style.transform = "none";
+    document.documentElement.style.width = "max-content";
+    document.documentElement.style.height = "auto";
+    document.body.style.width = "max-content";
+    document.body.style.height = "auto";
   }
-  document.documentElement.style.width = "max-content";
-  document.documentElement.style.height = "auto";
-  document.body.style.width = "max-content";
-  document.body.style.height = "auto";
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   const rect = canvas ? canvas.getBoundingClientRect() : document.body.getBoundingClientRect();
+  const main = document.querySelector("main");
+  const mainRect = main ? main.getBoundingClientRect() : rect;
   return {
-    width: Math.ceil(Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, rect.right + 24)),
-    height: Math.ceil(Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, rect.bottom + 24))
+    width: Math.ceil(Math.max(
+      document.documentElement.scrollWidth,
+      document.body.scrollWidth,
+      rect.right + window.scrollX + 24,
+      mainRect.right + window.scrollX + 24
+    )),
+    height: Math.ceil(Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+      document.documentElement.offsetHeight,
+      document.body.offsetHeight,
+      rect.bottom + window.scrollY + 24,
+      mainRect.bottom + window.scrollY + 24
+    ))
   };
 })()
 """,

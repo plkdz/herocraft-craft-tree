@@ -5,9 +5,9 @@
 工作流程：
 
 - 查找本机 Edge 或 Chrome；也可用环境变量 `HEROCRAFT_BROWSER` 指定浏览器路径。
-- 复制一份临时 HTML，把初始脚本改成 `setAllDetails(true)`，用于截图前全部展开。
-- 通过 Chrome DevTools Protocol 打开 HTML，截图前解除 `.tree-viewport` 的固定视口裁剪并清掉平移缩放。
-- 读取解除裁剪后的页面完整宽高。
+- 复制一份临时 HTML，把初始脚本改成 `setAllDetails(true)`，用于截图前全部展开；调用方负责用完后删除临时文件。
+- 通过 Chrome DevTools Protocol 打开 HTML，截图前解除 `.tree-viewport` 的固定视口裁剪并清掉平移缩放；普通表格页面没有树控件时会跳过树专用处理。
+- 读取解除裁剪后的页面完整宽高，并同时参考 `main` 区域边界，避免顺序表这类非树页面截图被裁短。
 - 使用 `Page.captureScreenshot(captureBeyondViewport=true)` 分块截图，再用 Pillow 拼成完整 PNG，避免只截当前视口和浏览器单张截图尺寸限制。
 - 分块截图时会输出图片尺寸、总块数和当前进度。
 - DevTools 连接保留较长读超时，避免大图生成超过 10 秒时误判失败。

@@ -620,10 +620,12 @@ def resolve_base_elements(
 
 
 def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if stdout_reconfigure is not None:
+        stdout_reconfigure(encoding="utf-8", errors="replace")
+    stderr_reconfigure = getattr(sys.stderr, "reconfigure", None)
+    if stderr_reconfigure is not None:
+        stderr_reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
     if args.max_depth < 1:
@@ -779,12 +781,16 @@ def main() -> None:
             if args.image:
                 expanded_html_path = write_expanded_html_for_image(output_path)
                 image_path = str(args.image_output) if args.image_output else image_output_path(output_path)
-                render_html_image(
-                    expanded_html_path,
-                    image_path,
-                    width=int(args.image_width),
-                    height=int(args.image_height),
-                )
+                try:
+                    render_html_image(
+                        expanded_html_path,
+                        image_path,
+                        width=int(args.image_width),
+                        height=int(args.image_height),
+                    )
+                finally:
+                    if os.path.exists(expanded_html_path):
+                        os.remove(expanded_html_path)
                 print(f"已写入图片：{image_path}", file=sys.stderr)
             if blockers_path:
                 print(f"底层阻塞点完整列表：{blockers_path}", file=sys.stderr)
