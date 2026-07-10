@@ -106,10 +106,12 @@ def refresh_details(client: HeroCraftClient, object_ids: list[int], *, retry_rou
 
 
 def main() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if stdout_reconfigure is not None:
+        stdout_reconfigure(encoding="utf-8", errors="replace")
+    stderr_reconfigure = getattr(sys.stderr, "reconfigure", None)
+    if stderr_reconfigure is not None:
+        stderr_reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
     if args.workers < 1:

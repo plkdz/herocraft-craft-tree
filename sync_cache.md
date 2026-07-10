@@ -16,6 +16,7 @@ python sync_cache.py --missing-only --workers 200 --request-limit 1000
 - 对每个去重后的对象 id 强制请求一次详情并写入 `.herocraft_cache/object_details.json`。
 - 单个详情请求失败不会让整轮同步直接丢失已成功结果；失败 id 会在一轮结束后重试，默认最多 3 轮。
 - 无论正常结束还是异常退出，入口都会尽量保存已经拿到的缓存。
+- 入口会在支持 `reconfigure()` 的 Python 运行时显式切到 UTF-8 输出，避免 Windows 终端中文进度乱码。
 - 加 `--missing-only` 时，只补齐本机没有详情缓存的对象；已缓存对象不会刷新。
 - 请求数约等于物品栏分页请求数加去重对象数；不会像合成树递归那样反复沿配方展开。
 
