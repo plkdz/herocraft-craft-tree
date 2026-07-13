@@ -6,7 +6,7 @@
 
 - 不读取 `.herocraft_cache`。
 - 不生成最少步数表。
-- 不替代旧树状图；`shortest_steps_tree.py` 会额外写出一个 `_order.html` 文件。
+- 不替代旧树状图；`shortest_steps_tree.py` 会额外写出一个 `_tree_steps_order-时间戳.html` 文件。
 - 只沿 `shortest_steps.json` 中父节点实际选中的子候选路线展开。
 
 输出逻辑：
@@ -22,4 +22,4 @@
 - `collect_order_steps()`：后序遍历最少步数路线，收集合成步骤。
 - `render_order_text()`：生成文本顺序表。
 - `build_order_html_document()`：生成独立 HTML 顺序表。
-- `order_output_path_for()`：从旧树状图 HTML 路径生成 `_order.html` 路径。
+- `order_output_path_for()`：从旧树状图 HTML 路径生成 `_tree_steps_order-时间戳.html` 路径。
