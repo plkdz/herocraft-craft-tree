@@ -3,8 +3,8 @@ from __future__ import annotations
 # 文件职责：专门同步 HeroCraft 本机缓存；刷新物品栏，并按物品 id 每个详情请求一次。
 #
 # 常用命令：
-# python sync_cache.py --workers 100 --request-limit 1000
-# python sync_cache.py --missing-only --workers 100 --request-limit 1000
+# python sync_cache.py
+# python sync_cache.py --missing-only
 
 import argparse
 import concurrent.futures
@@ -45,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--request-limit", type=int, default=1000, help="同时 HTTP 请求上限")
     parser.add_argument("--timeout", type=float, default=15.0, help="单次请求超时秒数")
     parser.add_argument("--missing-only", action="store_true", help="只补齐本机没有详情缓存的对象")
+    parser.add_argument("--detail-delay", type=float, default=1.0, help="对象详情请求间隔秒数；API 限流时保持默认值")
     return parser.parse_args()
 
 
@@ -65,26 +66,29 @@ def missing_detail_ids(client: HeroCraftClient, object_ids: list[int]) -> list[i
     return [object_id for object_id in object_ids if object_id not in cached_ids]
 
 
-def refresh_one_detail(client: HeroCraftClient, object_id: int) -> DetailFailure | None:
+def refresh_one_detail(client: HeroCraftClient, object_id: int, detail_delay: float) -> DetailFailure | None:
     try:
         client.refresh_object_detail(object_id)
     except Exception as exc:
         return DetailFailure(object_id=object_id, message=str(exc))
+    finally:
+        if detail_delay > 0:
+            time.sleep(detail_delay)
     return None
 
 
-def refresh_detail_round(client: HeroCraftClient, object_ids: list[int]) -> list[DetailFailure]:
+def refresh_detail_round(client: HeroCraftClient, object_ids: list[int], detail_delay: float) -> list[DetailFailure]:
     if client.max_workers <= 1 or len(object_ids) <= 1:
         failures: list[DetailFailure] = []
         for object_id in object_ids:
-            failure = refresh_one_detail(client, object_id)
+            failure = refresh_one_detail(client, object_id, detail_delay)
             if failure is not None:
                 failures.append(failure)
         return failures
     worker_count = min(client.max_workers, len(object_ids))
     failures: list[DetailFailure] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [executor.submit(refresh_one_detail, client, object_id) for object_id in object_ids]
+        futures = [executor.submit(refresh_one_detail, client, object_id, detail_delay) for object_id in object_ids]
         for future in concurrent.futures.as_completed(futures):
             failure = future.result()
             if failure is not None:
@@ -92,13 +96,19 @@ def refresh_detail_round(client: HeroCraftClient, object_ids: list[int]) -> list
     return failures
 
 
-def refresh_details(client: HeroCraftClient, object_ids: list[int], *, retry_rounds: int = 3) -> list[DetailFailure]:
+def refresh_details(
+    client: HeroCraftClient,
+    object_ids: list[int],
+    *,
+    detail_delay: float,
+    retry_rounds: int = 3,
+) -> list[DetailFailure]:
     retry_ids = object_ids
     failures: list[DetailFailure] = []
     for round_index in range(1, retry_rounds + 1):
         if not retry_ids:
             return []
-        failures = refresh_detail_round(client, retry_ids)
+        failures = refresh_detail_round(client, retry_ids, detail_delay)
         retry_ids = [failure.object_id for failure in failures]
         if failures and round_index < retry_rounds:
             print(f"\n第 {round_index} 轮详情失败：{len(failures)} 个，开始重试", file=sys.stderr)
@@ -118,6 +128,8 @@ def main() -> None:
         fail("--workers 必须大于 0")
     if args.request_limit < 1:
         fail("--request-limit 必须大于 0")
+    if args.detail_delay < 0:
+        fail("--detail-delay 不能小于 0")
 
     cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
     if not cookie:
@@ -129,7 +141,7 @@ def main() -> None:
             base_url=str(args.base_url).rstrip("/"),
             session_cookie=cookie,
             timeout_seconds=float(args.timeout),
-            max_workers=int(args.workers),
+            max_workers=1 if args.detail_delay > 0 else int(args.workers),
             branch_workers=2,
             deep_workers=1,
             request_limit=int(args.request_limit),
@@ -148,7 +160,7 @@ def main() -> None:
             object_ids = missing_detail_ids(client, object_ids)
         print(f"\n物品栏对象：{len(inventory)} 个；去重后详情请求：{len(object_ids)} 个", file=sys.stderr)
         progress.phase = "同步对象详情"
-        failures = refresh_details(client, object_ids)
+        failures = refresh_details(client, object_ids, detail_delay=float(args.detail_delay))
         client.save_cache()
         progress.finish()
         if failures:

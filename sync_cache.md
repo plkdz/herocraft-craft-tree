@@ -5,8 +5,8 @@
 常用命令：
 
 ```powershell
-python sync_cache.py --workers 200 --request-limit 1000
-python sync_cache.py --missing-only --workers 200 --request-limit 1000
+python sync_cache.py
+python sync_cache.py --missing-only
 ```
 
 同步逻辑：
@@ -22,8 +22,9 @@ python sync_cache.py --missing-only --workers 200 --request-limit 1000
 
 参数要点：
 
-- `--workers` 控制对象详情同步线程数。
+- `--workers` 控制对象详情同步线程数；默认 `--detail-delay 1.0` 时会自动单线程，避免详情接口限流。
 - `--request-limit` 控制同时 HTTP 请求总数。
+- `--detail-delay` 控制对象详情请求间隔，默认 1 秒；现在 API 会限制连续详情请求，除非确认限流放开，否则不要设成 0。
 - `--base-url` 指定 API 基址。
 - `--missing-only` 适合快速补缺；如果外部配方变了，仍应跑不带此参数的全量刷新。
 - `--cache-dir` 指定缓存目录，默认 `.herocraft_cache`。
