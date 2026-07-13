@@ -7,11 +7,12 @@ from __future__ import annotations
 # python sync_cache.py --missing-only
 
 import argparse
-import concurrent.futures
+import datetime as dt
 import os
 import sys
 import time
 from dataclasses import dataclass
+from typing import TextIO
 
 from herocraft_client import ClientConfig, HeroCraftClient
 from herocraft_core import (
@@ -30,6 +31,17 @@ from herocraft_core import (
 class DetailFailure:
     object_id: int
     message: str
+    attempts: int
+
+
+def open_log_file() -> TextIO:
+    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return open(f"tmp_herocraft_sync_{timestamp}.log", "w", encoding="utf-8")
+
+
+def log_line(log_file: TextIO, message: str) -> None:
+    timestamp = dt.datetime.now().isoformat(timespec="seconds")
+    print(f"{timestamp} {message}", file=log_file, flush=True)
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,7 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--request-limit", type=int, default=1000, help="同时 HTTP 请求上限")
     parser.add_argument("--timeout", type=float, default=15.0, help="单次请求超时秒数")
     parser.add_argument("--missing-only", action="store_true", help="只补齐本机没有详情缓存的对象")
-    parser.add_argument("--detail-delay", type=float, default=1.0, help="对象详情请求间隔秒数；API 限流时保持默认值")
+    parser.add_argument("--requests-per-minute", type=float, default=50.0, help="每分钟对象详情请求数")
+    parser.add_argument("--retry-rounds", type=int, default=3, help="详情失败重试轮数")
     return parser.parse_args()
 
 
@@ -66,34 +79,40 @@ def missing_detail_ids(client: HeroCraftClient, object_ids: list[int]) -> list[i
     return [object_id for object_id in object_ids if object_id not in cached_ids]
 
 
-def refresh_one_detail(client: HeroCraftClient, object_id: int, detail_delay: float) -> DetailFailure | None:
-    try:
-        client.refresh_object_detail(object_id)
-    except Exception as exc:
-        return DetailFailure(object_id=object_id, message=str(exc))
-    finally:
-        if detail_delay > 0:
-            time.sleep(detail_delay)
+def format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    minutes, second = divmod(seconds, 60)
+    hours, minute = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minute:02d}:{second:02d}"
+    return f"{minute:d}:{second:02d}"
+
+
+def refresh_one_detail(
+    client: HeroCraftClient,
+    object_id: int,
+    detail_delay: float,
+    retry_rounds: int,
+    log_file: TextIO,
+) -> DetailFailure | None:
+    for attempt in range(1, retry_rounds + 1):
+        try:
+            log_line(log_file, f"detail start id={object_id} attempt={attempt}/{retry_rounds}")
+            client.refresh_object_detail(object_id)
+            log_line(log_file, f"detail ok id={object_id} attempt={attempt}/{retry_rounds}")
+            if detail_delay > 0:
+                time.sleep(detail_delay)
+            return None
+        except Exception as exc:
+            log_line(log_file, f"detail fail id={object_id} attempt={attempt}/{retry_rounds} error={exc}")
+            if attempt >= retry_rounds:
+                if detail_delay > 0:
+                    time.sleep(detail_delay)
+                return DetailFailure(object_id=object_id, message=str(exc), attempts=attempt)
+            print(f"\n#{object_id} 详情失败，原地重试 {attempt}/{retry_rounds}: {exc}", file=sys.stderr)
+            if detail_delay > 0:
+                time.sleep(detail_delay)
     return None
-
-
-def refresh_detail_round(client: HeroCraftClient, object_ids: list[int], detail_delay: float) -> list[DetailFailure]:
-    if client.max_workers <= 1 or len(object_ids) <= 1:
-        failures: list[DetailFailure] = []
-        for object_id in object_ids:
-            failure = refresh_one_detail(client, object_id, detail_delay)
-            if failure is not None:
-                failures.append(failure)
-        return failures
-    worker_count = min(client.max_workers, len(object_ids))
-    failures: list[DetailFailure] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [executor.submit(refresh_one_detail, client, object_id, detail_delay) for object_id in object_ids]
-        for future in concurrent.futures.as_completed(futures):
-            failure = future.result()
-            if failure is not None:
-                failures.append(failure)
-    return failures
 
 
 def refresh_details(
@@ -101,18 +120,31 @@ def refresh_details(
     object_ids: list[int],
     *,
     detail_delay: float,
-    retry_rounds: int = 3,
+    retry_rounds: int,
+    log_file: TextIO,
 ) -> list[DetailFailure]:
-    retry_ids = object_ids
-    failures: list[DetailFailure] = []
-    for round_index in range(1, retry_rounds + 1):
-        if not retry_ids:
-            return []
-        failures = refresh_detail_round(client, retry_ids, detail_delay)
-        retry_ids = [failure.object_id for failure in failures]
-        if failures and round_index < retry_rounds:
-            print(f"\n第 {round_index} 轮详情失败：{len(failures)} 个，开始重试", file=sys.stderr)
-    return failures
+    if client.max_workers <= 1 or len(object_ids) <= 1:
+        failures: list[DetailFailure] = []
+        started_at = time.time()
+        total_count = len(object_ids)
+        for index, object_id in enumerate(object_ids, 1):
+            remaining_seconds = (total_count - index) * detail_delay
+            print(
+                f"\r同步详情 | "
+                f"{index}/{total_count} | "
+                f"耗时 {format_seconds(time.time() - started_at)} | "
+                f"预计剩余 {format_seconds(remaining_seconds)} | "
+                f"#{object_id}",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
+            failure = refresh_one_detail(client, object_id, detail_delay, retry_rounds, log_file)
+            if failure is not None:
+                failures.append(failure)
+        print(file=sys.stderr, flush=True)
+        return failures
+    fail("限速同步必须单线程")
 
 
 def main() -> None:
@@ -128,40 +160,53 @@ def main() -> None:
         fail("--workers 必须大于 0")
     if args.request_limit < 1:
         fail("--request-limit 必须大于 0")
-    if args.detail_delay < 0:
-        fail("--detail-delay 不能小于 0")
-
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
-    if not cookie:
-        fail("缺少 cookie。传 --cookie 或设置 HEROCRAFT_SESSION 环境变量。")
-
-    progress = ProgressStats(start_time=time.time())
-    client = HeroCraftClient(
-        ClientConfig(
-            base_url=str(args.base_url).rstrip("/"),
-            session_cookie=cookie,
-            timeout_seconds=float(args.timeout),
-            max_workers=1 if args.detail_delay > 0 else int(args.workers),
-            branch_workers=2,
-            deep_workers=1,
-            request_limit=int(args.request_limit),
-            cache_dir=str(args.cache_dir),
-            refresh_cache=False,
-            refresh_inventory=True,
-        ),
-        progress=progress,
-    )
+    if args.requests_per_minute <= 0:
+        fail("--requests-per-minute 必须大于 0")
+    if args.retry_rounds < 1:
+        fail("--retry-rounds 必须大于 0")
+    detail_delay = 60.0 / float(args.requests_per_minute)
+    log_file = open_log_file()
+    log_line(log_file, f"sync start cache_dir={args.cache_dir} missing_only={args.missing_only} rpm={args.requests_per_minute} retry_rounds={args.retry_rounds}")
+    print(f"同步日志：{log_file.name}", file=sys.stderr)
 
     try:
+        cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+        if not cookie:
+            fail("缺少 cookie。传 --cookie 或设置 HEROCRAFT_SESSION 环境变量。")
+
+        progress = ProgressStats(start_time=time.time())
+        progress.report_interval_seconds = float("inf")
+        client = HeroCraftClient(
+            ClientConfig(
+                base_url=str(args.base_url).rstrip("/"),
+                session_cookie=cookie,
+                timeout_seconds=float(args.timeout),
+                max_workers=1,
+                branch_workers=2,
+                deep_workers=1,
+                request_limit=int(args.request_limit),
+                cache_dir=str(args.cache_dir),
+                refresh_cache=False,
+                refresh_inventory=True,
+            ),
+            progress=progress,
+        )
+
         progress.phase = "同步物品栏"
+        log_line(log_file, "inventory start")
         inventory = client.my_objects()
+        log_line(log_file, f"inventory ok count={len(inventory)}")
         object_ids = unique_inventory_ids(inventory)
         if args.missing_only:
             object_ids = missing_detail_ids(client, object_ids)
+            log_line(log_file, f"missing only detail_count={len(object_ids)}")
         print(f"\n物品栏对象：{len(inventory)} 个；去重后详情请求：{len(object_ids)} 个", file=sys.stderr)
         progress.phase = "同步对象详情"
-        failures = refresh_details(client, object_ids, detail_delay=float(args.detail_delay))
+        failures = refresh_details(client, object_ids, detail_delay=detail_delay, retry_rounds=int(args.retry_rounds), log_file=log_file)
+        log_line(log_file, f"details done failures={len(failures)}")
+        log_line(log_file, "save cache start")
         client.save_cache()
+        log_line(log_file, "save cache ok")
         progress.finish()
         if failures:
             preview = "；".join(f"#{failure.object_id}: {failure.message}" for failure in failures[:10])
@@ -169,9 +214,17 @@ def main() -> None:
             print(f"详情同步失败：{len(failures)} 个。{preview}{suffix}", file=sys.stderr)
         print(f"缓存已同步：{args.cache_dir}", file=sys.stderr)
     except Exception:
-        client.save_cache()
-        progress.finish()
+        log_line(log_file, "exception raised")
+        if "client" in locals():
+            log_line(log_file, "exception save cache start")
+            client.save_cache()
+            log_line(log_file, "exception save cache ok")
+        if "progress" in locals():
+            progress.finish()
         raise
+    finally:
+        log_line(log_file, "sync end")
+        log_file.close()
 
 
 if __name__ == "__main__":

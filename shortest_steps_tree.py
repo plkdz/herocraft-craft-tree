@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="查询 HeroCraft 最少合成步数树")
     parser.add_argument("item", nargs="?", default=DEFAULT_ITEM, help=f"物品名称或物品 id；默认：{DEFAULT_ITEM}")
     parser.add_argument("item_type", nargs="?", default="", help=f"对象类型：元素、物品、装备、生物、概念；默认：{DEFAULT_TYPE}")
+    parser.add_argument("--id", action="store_true", help="把 item 按对象 id 解析；默认按名称解析")
     parser.add_argument("--cache-dir", default=CACHE_DIR, help="缓存目录")
     parser.add_argument("--routes", default="", help=f"最少步数表路径；默认缓存目录下 {SHORTEST_STEPS_FILE}")
     parser.add_argument("--show-id", action="store_true", help="显示对象 id")
@@ -94,10 +95,12 @@ def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
     return result
 
 
-def resolve_cached_object(query: str, item_type: str, details: dict[int, ApiObject]) -> ApiObject:
+def resolve_cached_object(query: str, item_type: str, details: dict[int, ApiObject], *, by_id: bool = False) -> ApiObject:
     type_filter = parse_type_filter(item_type or DEFAULT_TYPE)
     query = query.strip()
-    if query.isdigit():
+    if by_id:
+        if not query.isdigit():
+            raise RuntimeError(f"--id 需要正整数对象 id：{query}")
         obj = details.get(int(query))
         if obj is None:
             raise RuntimeError(f"详情缓存里找不到 id={query}。先运行 sync_cache.py")
@@ -201,9 +204,10 @@ def refresh_inventory_for_dynamic(args: argparse.Namespace) -> None:
     missing_ids = [require_id(item) for item in inventory if require_id(item) not in cached_ids]
     print(f"动态刷新：物品栏对象 {len(inventory)} 个，缺详情 {len(missing_ids)} 个", file=sys.stderr)
     detail_delay = 60.0 / float(args.requests_per_minute)
+    inventory_by_id = {require_id(item): item for item in inventory}
     for index, object_id in enumerate(missing_ids, 1):
         print(
-            f"\r动态刷新：补齐缺失详情 {index}/{len(missing_ids)} | #{object_id}",
+            f"\r动态刷新：补齐缺失详情 {index}/{len(missing_ids)} | {progress_object_label(object_id, inventory_by_id.get(object_id))}",
             end="",
             file=sys.stderr,
             flush=True,
@@ -276,6 +280,12 @@ def route_object_id_order(
 
 def craft_sources_key(obj: ApiObject) -> str:
     return json.dumps(obj.get("craft_sources", []), ensure_ascii=False, sort_keys=True)
+
+
+def progress_object_label(object_id: int, obj: ApiObject | None) -> str:
+    if obj is None:
+        return f"#{object_id}"
+    return format_object(obj, show_id=True)
 
 
 def write_result(
@@ -378,7 +388,7 @@ def dynamic_refresh_details(
                 f"已发现候选 {discovered_total}/{max_refresh} | "
                 f"耗时 {elapsed:6.1f}s | 预计剩余 {eta_seconds:6.1f}s | "
                 f"扩散层 {expand_from_route}/{expand_depth} | "
-                f"变更 {changed} | 跳过重复 {skipped_seen} | #{object_id}",
+                f"变更 {changed} | 跳过重复 {skipped_seen} | {progress_object_label(object_id, before)}",
                 end="",
                 file=sys.stderr,
                 flush=True,
@@ -467,9 +477,9 @@ def main() -> None:
         steps_path = str(args.routes) if args.routes else os.path.join(str(args.cache_dir), SHORTEST_STEPS_FILE)
         steps_table = load_shortest_steps(steps_path)
         try:
-            target = resolve_cached_object(str(args.item), str(args.item_type), details)
+            target = resolve_cached_object(str(args.item), str(args.item_type), details, by_id=bool(args.id))
         except RuntimeError:
-            if not args.dynamic_refresh or not str(args.item).strip().isdigit():
+            if not bool(args.id) or not args.dynamic_refresh or not str(args.item).strip().isdigit():
                 raise
             target = refresh_missing_target(args, int(str(args.item).strip()))
             details = load_detail_cache(str(args.cache_dir))

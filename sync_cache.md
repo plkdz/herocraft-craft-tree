@@ -22,9 +22,10 @@ python sync_cache.py --missing-only
 
 参数要点：
 
-- `--workers` 控制对象详情同步线程数；默认 `--detail-delay 1.0` 时会自动单线程，避免详情接口限流。
+- `--workers` 当前只保留兼容；对象详情按限速单线程同步，避免详情接口限流。
 - `--request-limit` 控制同时 HTTP 请求总数。
-- `--detail-delay` 控制对象详情请求间隔，默认 1 秒；现在 API 会限制连续详情请求，除非确认限流放开，否则不要设成 0。
+- `--requests-per-minute` 控制对象详情请求速率，默认 50 次/分钟。
+- `--retry-rounds` 控制详情失败重试轮数，默认 3 轮。
 - `--base-url` 指定 API 基址。
 - `--missing-only` 适合快速补缺；如果外部配方变了，仍应跑不带此参数的全量刷新。
 - `--cache-dir` 指定缓存目录，默认 `.herocraft_cache`。

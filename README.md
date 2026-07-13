@@ -85,6 +85,7 @@ python shortest_steps_tree.py 蒸汽 元素 --image
 缓存同步参数：
 
 - `sync_cache.py --missing-only`：只补齐本机没有详情缓存的对象；如果外部配方变了，仍应跑不带此参数的全量刷新。
+- `sync_cache.py --requests-per-minute 50 --retry-rounds 3`：控制详情同步限速和失败重试；这也是默认值。
 
 源码说明：
 
