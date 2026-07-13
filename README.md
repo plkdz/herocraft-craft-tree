@@ -27,7 +27,7 @@ Set-Content -Path .herocraft_session -Encoding utf8 -Value '123456=.123456'
 1. 同步缓存：
 
 ```powershell
-python sync_cache.py --workers 100 --request-limit 1000
+python sync_cache.py
 ```
 
 1. 查询配方：
@@ -45,8 +45,8 @@ python shortest_depth_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-wo
 python shortest_depth_tree.py 末日鱼雷 装备 --max-depth 999 --workers 20 --deep-workers 6 --single-shortest-route --image
 python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6
 python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --show-all-sources
-python sync_cache.py --workers 100 --request-limit 1000
-python sync_cache.py --missing-only --workers 100 --request-limit 1000
+python sync_cache.py
+python sync_cache.py --missing-only
 python build_shortest_steps.py
 python build_shortest_steps.py --candidate-limit 8 --max-iterations 999
 python shortest_steps_tree.py 蒸汽 元素 --image
@@ -56,9 +56,9 @@ python shortest_steps_tree.py 蒸汽 元素 --image
 加 `--image` 会把 HTML 自动全部展开、解除视口裁剪后分块渲染并拼成完整 PNG，不是当前视口截图；PNG 默认与 HTML 同名。
 如果存在不可达底层阻塞点，还会额外生成 `_tree_blockers-时间戳.txt` 完整列表和 `_tree_blockers-时间戳.html` 树状影响图；影响图按真实依赖层级展示，不是单层列表，根阻塞点横向排列并支持展开折叠、缩放和平移。
 
-本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。`shortest_depth_tree.py` 只读本机缓存，不发网络请求；外部配方或物品栏可能更新时，统一用 `sync_cache.py` 全量同步缓存：它会重新拉取已发现物品列表，并对去重后的每个对象 id 请求一次详情。需要刷新持久化最少步数表时，再运行 `python build_shortest_steps.py`，输出 `.herocraft_cache/shortest_steps.json`。
+本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。`shortest_depth_tree.py` 只读本机缓存，不发网络请求；外部配方或物品栏可能更新时，统一用 `sync_cache.py` 全量同步缓存：它会重新拉取已发现物品列表，并按 API 当前限流对去重后的每个对象 id 请求一次详情。需要刷新持久化最少步数表时，再运行 `python build_shortest_steps.py`，输出 `.herocraft_cache/shortest_steps.json`。
 
-最少步数树由 `shortest_steps_tree.py` 查询，使用 `build_shortest_steps.py` 预生成的持久化表；步数按需要合成的非基础产物数量计算，同一个中间物只算一次。查询最少步数 HTML 时会保留旧树状图，并额外生成 `_tree_steps_order-时间戳.html` 合成顺序表；加 `--image` 时也会额外生成同名 `.png`。
+最少步数树由 `shortest_steps_tree.py` 查询，使用 `build_shortest_steps.py` 预生成的持久化表；预生成表里的步数是保守估计，实际最小步数以顺序表展开结果为准。查询最少步数 HTML 时会保留旧树状图，并额外生成 `_tree_steps_order-时间戳.html` 合成顺序表；加 `--image` 时也会额外生成同名 `.png`。
 
 常用参数：
 

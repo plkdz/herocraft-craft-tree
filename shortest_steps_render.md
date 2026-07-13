@@ -11,8 +11,8 @@
 
 主要函数：
 
-- `render_steps_tree_text()`：生成文本树行列表。
-- `build_html_document()`：生成完整 HTML 页面，底层调用 `tree_html_render.py`。
+- `render_steps_tree_text()`：生成文本树行列表，节点步数标为保守估计。
+- `build_html_document()`：生成完整 HTML 页面，顶部摘要显示保守估计步数，底层调用 `tree_html_render.py`。
 - `build_html_node()`：递归组装通用 `HtmlTreeNode`。
 - `output_path_for()`：生成默认输出路径。
 - `recipe_ids()`：从持久化 route 记录里读取 A/B 材料 id。

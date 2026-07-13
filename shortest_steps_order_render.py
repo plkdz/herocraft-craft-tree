@@ -202,7 +202,7 @@ def build_order_html_document(
 <body>
   <main>
     <h1>{escaped_title}</h1>
-    <p class="summary">本玩家已知最少合成步数：{html.escape(str(route.get("steps", "未知")))}；顺序表共 {len(steps)} 步。</p>
+    <p class="summary">本玩家已知最少合成步数（保守估计）：{html.escape(str(route.get("steps", "未知")))}；顺序表实际最小步数：{len(steps)}</p>
     <table>
       <thead>
         <tr>

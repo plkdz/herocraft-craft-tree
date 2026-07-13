@@ -25,7 +25,7 @@ from herocraft_core import (
     require_id,
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
-from shortest_steps_order_render import build_order_html_document, order_output_path_for, render_order_text
+from shortest_steps_order_render import build_order_html_document, collect_order_steps, order_output_path_for, render_order_text
 from shortest_steps_render import build_html_document, output_path_for, render_steps_tree_text
 
 
@@ -96,11 +96,13 @@ def main() -> None:
         step = steps_table.get(target_id)
         if step is None:
             fail(f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。先同步缓存并运行 python build_shortest_steps.py")
+        actual_step_count = len(collect_order_steps(target_id, details=details, steps_table=steps_table, show_id=bool(args.show_id)))
         output_format: OutputFormat = str(args.format)  # type: ignore[assignment]
         if output_format == "text":
             content = (
                 f"目标：{format_object(target, show_id=args.show_id)}\n"
-                f"最少步数：{step.get('steps')}\n\n"
+                f"最少步数（保守估计）：{step.get('steps')}\n\n"
+                f"实际最小步数：{actual_step_count}\n\n"
                 + "\n".join(render_steps_tree_text(target_id, details=details, steps_table=steps_table, show_id=bool(args.show_id)))
                 + "\n\n合成顺序：\n"
                 + "\n".join(render_order_text(target_id, details=details, steps_table=steps_table, show_id=bool(args.show_id)))
@@ -113,7 +115,8 @@ def main() -> None:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as file:
             file.write(content)
-        print(f"最少步数：{step.get('steps')}")
+        print(f"最少步数（保守估计）：{step.get('steps')}")
+        print(f"实际最小步数：{actual_step_count}")
         print(f"已写入：{output_path}")
 
         order_path = ""

@@ -65,7 +65,7 @@ def render_steps_tree_text(
         return [f"{indent}{format_object(obj, show_id=show_id)}（最少步数表不可达）"]
 
     steps = route.get("steps")
-    line = f"{indent}{format_object(obj, show_id=show_id)} | 最少步数 {steps}"
+    line = f"{indent}{format_object(obj, show_id=show_id)} | 保守估计步数 {steps}"
     ids = recipe_ids(route)
     if ids is None:
         return [line + " | 基础元素"]
@@ -114,7 +114,7 @@ def build_html_node(
     if route is None:
         return HtmlTreeNode(title=label, css_class="error", notes=("最少步数表不可达",))
 
-    note = f"最少步数 {route.get('steps', '')}"
+    note = f"保守估计步数 {route.get('steps', '')}"
     ids = recipe_ids(route)
     if ids is None:
         return HtmlTreeNode(title=label, css_class="base", notes=(note, "基础元素"))
@@ -159,6 +159,6 @@ def build_html_document(
 ) -> str:
     title = f"最少步数树 - {format_object(target, show_id=show_id)}"
     route = steps_table.get(require_id(target), {})
-    summary = f"<p class=\"route-summary\">最少合成步数：{route.get('steps', '未知')}</p>"
+    summary = f"<p class=\"route-summary\">最少合成步数（保守估计）：{route.get('steps', '未知')}</p>"
     body = build_html_node(require_id(target), details=details, steps_table=steps_table, show_id=show_id)
     return build_tree_html_document(title=title, summary_html=summary, body=body)
