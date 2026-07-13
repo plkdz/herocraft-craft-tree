@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -172,7 +173,23 @@ def default_output_path(target: ApiObject, output_format: OutputFormat) -> str:
     name = safe_filename_part(target.get("name") or "item")
     type_label = safe_filename_part(format_type(target))
     suffix = "html" if output_format == "html" else "txt"
-    return os.path.join(RESULTS_DIR, f"{timestamp}-{name}-{type_label}_tree.{suffix}")
+    return os.path.join(RESULTS_DIR, f"{name}-{type_label}_tree-{timestamp}.{suffix}")
+
+
+def output_path_with_label_before_timestamp(
+    output_path: str,
+    label: str,
+    default_extension: str = "",
+    *,
+    extension_override: str | None = None,
+) -> str:
+    stem, extension = os.path.splitext(output_path)
+    final_extension = extension_override if extension_override is not None else extension or default_extension
+    timestamp_match = re.search(r"-(\d{8}-\d{6})$", stem)
+    if timestamp_match is None:
+        return f"{stem}{label}{final_extension}"
+    return f"{stem[:timestamp_match.start()]}{label}{stem[timestamp_match.start():]}{final_extension}"
+
 
 def fail(message: str) -> NoReturn:
     print(f"???{message}", file=sys.stderr)

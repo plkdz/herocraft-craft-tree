@@ -35,6 +35,7 @@ from herocraft_core import (
     format_object,
     is_base_object,
     iter_sources,
+    output_path_with_label_before_timestamp,
     parse_int_set,
     parse_name_set,
     parse_type_filter,
@@ -124,13 +125,11 @@ def collect_unreachable_ids(
 
 
 def blocker_output_path(output_path: str) -> str:
-    stem, _ = os.path.splitext(output_path)
-    return f"{stem}_blockers.txt"
+    return output_path_with_label_before_timestamp(output_path, "_blockers", extension_override=".txt")
 
 
 def blocker_html_output_path(output_path: str) -> str:
-    stem, _ = os.path.splitext(output_path)
-    return f"{stem}_blockers.html"
+    return output_path_with_label_before_timestamp(output_path, "_blockers", extension_override=".html")
 
 
 def build_blocker_report(

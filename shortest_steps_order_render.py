@@ -3,11 +3,10 @@ from __future__ import annotations
 # 文件职责：把持久化最少步数路线渲染成按合成先后排列的 HTML 顺序表。
 
 import html
-import os
 from dataclasses import dataclass
 from typing import Any
 
-from herocraft_core import ApiObject, format_object, format_operation, require_id
+from herocraft_core import ApiObject, format_object, format_operation, output_path_with_label_before_timestamp, require_id
 from shortest_steps_render import child_route, recipe_ids
 
 
@@ -103,8 +102,7 @@ def render_order_text(
 
 
 def order_output_path_for(tree_output_path: str) -> str:
-    stem, extension = os.path.splitext(tree_output_path)
-    return f"{stem}_order{extension or '.html'}"
+    return output_path_with_label_before_timestamp(tree_output_path, "_order", ".html")
 
 
 def build_order_html_document(

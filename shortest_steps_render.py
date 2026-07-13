@@ -2,10 +2,9 @@ from __future__ import annotations
 
 # 文件职责：组装持久化最少步数合成树的 text/html 输出；不读取缓存，不做路线计算。
 
-import os
 from typing import Any
 
-from herocraft_core import ApiObject, OutputFormat, default_output_path, format_object, format_operation, require_id
+from herocraft_core import ApiObject, OutputFormat, default_output_path, format_object, format_operation, output_path_with_label_before_timestamp, require_id
 from tree_html_render import HtmlRecipeNode, HtmlTreeNode, badge_html, build_tree_html_document
 
 
@@ -90,8 +89,7 @@ def render_steps_tree_text(
 
 def output_path_for(target: ApiObject, output_format: OutputFormat) -> str:
     path = default_output_path(target, output_format)
-    stem, extension = os.path.splitext(path)
-    return f"{stem}_steps{extension}"
+    return output_path_with_label_before_timestamp(path, "_steps")
 
 
 def build_html_node(
