@@ -8,9 +8,11 @@ from __future__ import annotations
 # python build_shortest_steps.py --self-test
 
 import argparse
+import contextlib
 import datetime as dt
 import json
 import os
+import shutil
 import sys
 import time
 from collections import defaultdict, deque
@@ -63,8 +65,17 @@ def parse_args() -> argparse.Namespace:
 
 def load_detail_cache(cache_dir: str) -> dict[int, ApiObject]:
     path = os.path.join(cache_dir, DETAIL_CACHE_FILE)
-    with open(path, "r", encoding="utf-8") as file:
-        raw_cache = json.load(file)
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            raw_cache = json.load(file)
+    except json.JSONDecodeError as exc:
+        backup_path = f"{path}.bak"
+        try:
+            with open(backup_path, "r", encoding="utf-8") as file:
+                raw_cache = json.load(file)
+        except (OSError, json.JSONDecodeError) as backup_exc:
+            raise RuntimeError(f"{path} 已损坏，且无法读取备份 {backup_path}。请重新运行 sync_cache.py") from backup_exc
+        print(f"{path} 已损坏，已改用备份 {backup_path}：{exc}", file=sys.stderr)
     if not isinstance(raw_cache, dict):
         raise RuntimeError(f"{path} 不是对象详情缓存")
     details: dict[int, ApiObject] = {}
@@ -349,8 +360,14 @@ def build_output_payload(
 
 def write_json(path: str, payload: dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as file:
+    temp_path = f"{path}.tmp"
+    backup_path = f"{path}.bak"
+    with open(temp_path, "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, indent=2)
+    if os.path.exists(path):
+        with contextlib.suppress(OSError):
+            shutil.copy2(path, backup_path)
+    os.replace(temp_path, path)
 
 
 def self_test() -> None:

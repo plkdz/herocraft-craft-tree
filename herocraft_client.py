@@ -3,9 +3,11 @@ from __future__ import annotations
 # 文件职责：封装 HeroCraft HTTP API、本机明文缓存、请求并发闸门和对象解析。
 
 import concurrent.futures
+import contextlib
 import http.client
 import json
 import os
+import shutil
 import socket
 import threading
 import urllib.error
@@ -77,7 +79,9 @@ class HeroCraftClient:
             with open(path, "r", encoding="utf-8") as file:
                 raw_cache = json.load(file)
         except (OSError, json.JSONDecodeError):
-            return {}
+            raw_cache = self._load_json_backup(DETAIL_CACHE_FILE)
+            if raw_cache is None:
+                return {}
         if not isinstance(raw_cache, dict):
             return {}
         result: dict[int, ApiObject] = {}
@@ -96,7 +100,9 @@ class HeroCraftClient:
             with open(path, "r", encoding="utf-8") as file:
                 raw_items = json.load(file)
         except (OSError, json.JSONDecodeError):
-            return None
+            raw_items = self._load_json_backup(INVENTORY_CACHE_FILE)
+            if raw_items is None:
+                return None
         if not isinstance(raw_items, list):
             return None
         return [item for item in raw_items if isinstance(item, dict)]
@@ -106,12 +112,29 @@ class HeroCraftClient:
             os.makedirs(self._config.cache_dir, exist_ok=True)
             with self._detail_cache_lock:
                 detail_cache = {str(object_id): obj for object_id, obj in self._detail_cache.items()}
-            with open(self._cache_path(DETAIL_CACHE_FILE), "w", encoding="utf-8") as file:
-                json.dump(detail_cache, file, ensure_ascii=False, indent=2)
+            self._write_json_cache(DETAIL_CACHE_FILE, detail_cache)
             if self._mine_cache is not None:
-                with open(self._cache_path(INVENTORY_CACHE_FILE), "w", encoding="utf-8") as file:
-                    json.dump(self._mine_cache, file, ensure_ascii=False, indent=2)
+                self._write_json_cache(INVENTORY_CACHE_FILE, self._mine_cache)
             self._details_since_save = 0
+
+    def _write_json_cache(self, filename: str, payload: Any) -> None:
+        path = self._cache_path(filename)
+        temp_path = f"{path}.tmp"
+        backup_path = f"{path}.bak"
+        with open(temp_path, "w", encoding="utf-8") as file:
+            json.dump(payload, file, ensure_ascii=False, indent=2)
+        if os.path.exists(path):
+            with contextlib.suppress(OSError):
+                shutil.copy2(path, backup_path)
+        os.replace(temp_path, path)
+
+    def _load_json_backup(self, filename: str) -> Any | None:
+        backup_path = f"{self._cache_path(filename)}.bak"
+        try:
+            with open(backup_path, "r", encoding="utf-8") as file:
+                return json.load(file)
+        except (OSError, json.JSONDecodeError):
+            return None
 
     def maybe_save_cache(self) -> None:
         if self._details_since_save >= 100:
