@@ -34,12 +34,13 @@ from herocraft_core import (
 )
 
 SHORTEST_STEPS_FILE = "shortest_steps.json"
+INT_BIT_COUNT = getattr(int, "bit_count", None)
 
 
 @dataclass(frozen=True)
 class StepCandidate:
     steps: int
-    required_ids: frozenset[int]
+    required_mask: int
     recipe: CraftSource | None
     ingredient_candidates: tuple["StepCandidate", "StepCandidate"] | None = None
 
@@ -101,13 +102,44 @@ def resolve_base_ids(
     return resolved
 
 
+def build_id_bit_maps(details: dict[int, ApiObject]) -> tuple[dict[int, int], list[int]]:
+    bit_to_id = sorted(details)
+    return {object_id: index for index, object_id in enumerate(bit_to_id)}, bit_to_id
+
+
+def mask_to_ids(mask: int, bit_to_id: list[int]) -> list[int]:
+    ids: list[int] = []
+    while mask:
+        lowest_bit = mask & -mask
+        ids.append(bit_to_id[lowest_bit.bit_length() - 1])
+        mask ^= lowest_bit
+    return ids
+
+
+def mask_count(mask: int) -> int:
+    if INT_BIT_COUNT is not None:
+        return INT_BIT_COUNT(mask)
+    return bin(mask).count("1")
+
+
+def candidate_sort_key(candidate: StepCandidate) -> tuple[int, int]:
+    return candidate.steps, candidate.required_mask
+
+
+def mask_is_subset(left: int, right: int) -> bool:
+    return left | right == right
+
+
 def prune_candidates(candidates: list[StepCandidate], *, limit: int) -> tuple[StepCandidate, ...]:
-    unique: dict[frozenset[int], StepCandidate] = {}
+    unique: dict[int, StepCandidate] = {}
     for candidate in candidates:
-        unique.setdefault(candidate.required_ids, candidate)
+        unique.setdefault(candidate.required_mask, candidate)
     kept: list[StepCandidate] = []
-    for candidate in sorted(unique.values(), key=lambda item: (item.steps, len(item.required_ids), sorted(item.required_ids))):
-        if any(existing.steps <= candidate.steps and existing.required_ids.issubset(candidate.required_ids) for existing in kept):
+    for candidate in sorted(unique.values(), key=candidate_sort_key):
+        if any(
+            existing.steps <= candidate.steps and mask_is_subset(existing.required_mask, candidate.required_mask)
+            for existing in kept
+        ):
             continue
         kept.append(candidate)
         if len(kept) >= limit:
@@ -137,11 +169,12 @@ def source_candidates(
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
+    result_bit: int,
 ) -> tuple[StepCandidate, ...]:
     options: list[tuple[StepCandidate, ...]] = []
     for ingredient in (source["ingredient_a"], source["ingredient_b"]):
         if is_base_object(ingredient, base_ids=base_ids, base_names=base_names):
-            options.append((StepCandidate(0, frozenset(), None),))
+            options.append((StepCandidate(0, 0, None),))
             continue
         ingredient_options = candidates_by_id.get(require_id(ingredient))
         if not ingredient_options:
@@ -151,11 +184,11 @@ def source_candidates(
     candidates: list[StepCandidate] = []
     for left in options[0]:
         for right in options[1]:
-            required_ids = frozenset({result_id}) | left.required_ids | right.required_ids
+            required_mask = result_bit | left.required_mask | right.required_mask
             candidates.append(
                 StepCandidate(
-                    steps=len(required_ids),
-                    required_ids=required_ids,
+                    steps=mask_count(required_mask),
+                    required_mask=required_mask,
                     recipe=source,
                     ingredient_candidates=(left, right),
                 )
@@ -170,6 +203,7 @@ def edge_candidates(
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
+    id_to_bit: dict[int, int],
 ) -> tuple[StepCandidate, ...]:
     return source_candidates(
         edge.source,
@@ -178,6 +212,7 @@ def edge_candidates(
         base_ids=base_ids,
         base_names=base_names,
         candidate_limit=candidate_limit,
+        result_bit=1 << id_to_bit[edge.result_id],
     )
 
 
@@ -190,8 +225,9 @@ def build_shortest_steps(
     max_iterations: int,
     show_progress: bool,
 ) -> dict[int, tuple[StepCandidate, ...]]:
+    id_to_bit, _ = build_id_bit_maps(details)
     candidates_by_id: dict[int, tuple[StepCandidate, ...]] = {
-        object_id: (StepCandidate(0, frozenset(), None),)
+        object_id: (StepCandidate(0, 0, None),)
         for object_id, obj in details.items()
         if is_base_object(obj, base_ids=base_ids, base_names=base_names)
     }
@@ -232,6 +268,7 @@ def build_shortest_steps(
                 base_ids=base_ids,
                 base_names=base_names,
                 candidate_limit=candidate_limit,
+                id_to_bit=id_to_bit,
             )
         )
         pruned = prune_candidates(candidates, limit=candidate_limit)
@@ -259,10 +296,10 @@ def build_shortest_steps(
 
 
 def best_candidate(candidates: tuple[StepCandidate, ...]) -> StepCandidate:
-    return min(candidates, key=lambda item: (item.steps, len(item.required_ids), sorted(item.required_ids)))
+    return min(candidates, key=candidate_sort_key)
 
 
-def candidate_record(candidate: StepCandidate) -> dict[str, Any]:
+def candidate_record(candidate: StepCandidate, *, bit_to_id: list[int]) -> dict[str, Any]:
     recipe = candidate.recipe
     recipe_record: dict[str, Any] | None = None
     if recipe is not None:
@@ -276,19 +313,19 @@ def candidate_record(candidate: StepCandidate) -> dict[str, Any]:
         if candidate.ingredient_candidates is not None:
             left_candidate, right_candidate = candidate.ingredient_candidates
             recipe_record["ingredient_a_steps"] = left_candidate.steps
-            recipe_record["ingredient_a_required_ids"] = sorted(left_candidate.required_ids)
+            recipe_record["ingredient_a_required_ids"] = mask_to_ids(left_candidate.required_mask, bit_to_id)
             recipe_record["ingredient_b_steps"] = right_candidate.steps
-            recipe_record["ingredient_b_required_ids"] = sorted(right_candidate.required_ids)
+            recipe_record["ingredient_b_required_ids"] = mask_to_ids(right_candidate.required_mask, bit_to_id)
     return {
         "steps": candidate.steps,
-        "required_ids": sorted(candidate.required_ids),
+        "required_ids": mask_to_ids(candidate.required_mask, bit_to_id),
         "recipe": recipe_record,
     }
 
 
-def step_record(obj: ApiObject, candidates: tuple[StepCandidate, ...]) -> dict[str, Any]:
+def step_record(obj: ApiObject, candidates: tuple[StepCandidate, ...], *, bit_to_id: list[int]) -> dict[str, Any]:
     best = best_candidate(candidates)
-    best_record = candidate_record(best)
+    best_record = candidate_record(best, bit_to_id=bit_to_id)
     return {
         "id": require_id(obj),
         "name": obj.get("name", ""),
@@ -297,7 +334,7 @@ def step_record(obj: ApiObject, candidates: tuple[StepCandidate, ...]) -> dict[s
         "steps": best_record["steps"],
         "required_ids": best_record["required_ids"],
         "recipe": best_record["recipe"],
-        "candidates": [candidate_record(candidate) for candidate in candidates],
+        "candidates": [candidate_record(candidate, bit_to_id=bit_to_id) for candidate in candidates],
     }
 
 
@@ -306,9 +343,9 @@ def collect_referenced_candidates(
     candidate: StepCandidate,
     *,
     details: dict[int, ApiObject],
-    records_by_id: dict[int, dict[tuple[int, tuple[int, ...]], StepCandidate]],
+    records_by_id: dict[int, dict[tuple[int, int], StepCandidate]],
 ) -> None:
-    key = (candidate.steps, tuple(sorted(candidate.required_ids)))
+    key = (candidate.steps, candidate.required_mask)
     object_records = records_by_id.setdefault(object_id, {})
     if key in object_records:
         return
@@ -332,7 +369,8 @@ def build_output_payload(
     base_names: set[str],
     candidate_limit: int,
 ) -> dict[str, Any]:
-    records_by_id: dict[int, dict[tuple[int, tuple[int, ...]], StepCandidate]] = {}
+    _, bit_to_id = build_id_bit_maps(details)
+    records_by_id: dict[int, dict[tuple[int, int], StepCandidate]] = {}
     for object_id, candidates in candidates_by_id.items():
         if object_id not in details:
             continue
@@ -342,7 +380,8 @@ def build_output_payload(
     steps = {
         str(object_id): step_record(
             details[object_id],
-            tuple(sorted(records_by_id[object_id].values(), key=lambda item: (item.steps, len(item.required_ids), sorted(item.required_ids)))),
+            tuple(sorted(records_by_id[object_id].values(), key=candidate_sort_key)),
+            bit_to_id=bit_to_id,
         )
         for object_id in sorted(records_by_id)
         if object_id in details
@@ -358,12 +397,34 @@ def build_output_payload(
     }
 
 
-def write_json(path: str, payload: dict[str, Any]) -> None:
+def write_json(path: str, payload: dict[str, Any], *, show_progress: bool = False) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     temp_path = f"{path}.tmp"
     backup_path = f"{path}.bak"
+    started_at = time.time()
+    last_report = 0.0
+    written_chars = 0
+    encoder = json.JSONEncoder(ensure_ascii=False, indent=2)
     with open(temp_path, "w", encoding="utf-8") as file:
-        json.dump(payload, file, ensure_ascii=False, indent=2)
+        for chunk in encoder.iterencode(payload):
+            file.write(chunk)
+            written_chars += len(chunk)
+            if show_progress:
+                now = time.time()
+                if now - last_report >= 1.0:
+                    last_report = now
+                    print(
+                        f"\r写入 JSON {written_chars / 1024 / 1024:8.1f} MiB | 耗时 {now - started_at:6.1f}s",
+                        end="",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+    if show_progress:
+        print(
+            f"\r写入 JSON {written_chars / 1024 / 1024:8.1f} MiB | 耗时 {time.time() - started_at:6.1f}s",
+            file=sys.stderr,
+            flush=True,
+        )
     if os.path.exists(path):
         with contextlib.suppress(OSError):
             shutil.copy2(path, backup_path)
@@ -444,7 +505,7 @@ def main() -> None:
             candidate_limit=int(args.candidate_limit),
         )
         output_path = str(args.output) if args.output else os.path.join(str(args.cache_dir), SHORTEST_STEPS_FILE)
-        write_json(output_path, payload)
+        write_json(output_path, payload, show_progress=True)
         print(f"已写入：{output_path}")
         print(f"基础可达对象：{payload['step_count']} / {len(details)}")
     except RuntimeError as exc:
