@@ -52,6 +52,15 @@ class RecipeEdge:
     source: CraftSource
 
 
+@dataclass(frozen=True)
+class BuildResult:
+    routes: dict[int, tuple[StepCandidate, ...]]
+    converged: bool
+    remaining_queue: int
+    evaluations: int
+    max_evaluations: int
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成 HeroCraft 最少合成步数缓存")
     parser.add_argument("--cache-dir", default=CACHE_DIR, help="缓存目录")
@@ -224,7 +233,7 @@ def build_shortest_steps(
     candidate_limit: int,
     max_iterations: int,
     show_progress: bool,
-) -> dict[int, tuple[StepCandidate, ...]]:
+) -> BuildResult:
     id_to_bit, _ = build_id_bit_maps(details)
     candidates_by_id: dict[int, tuple[StepCandidate, ...]] = {
         object_id: (StepCandidate(0, 0, None),)
@@ -292,7 +301,13 @@ def build_shortest_steps(
     if show_progress:
         report_progress()
         print(file=sys.stderr, flush=True)
-    return candidates_by_id
+    return BuildResult(
+        routes=candidates_by_id,
+        converged=not queue,
+        remaining_queue=len(queue),
+        evaluations=evaluations,
+        max_evaluations=max_evaluations,
+    )
 
 
 def best_candidate(candidates: tuple[StepCandidate, ...]) -> StepCandidate:
@@ -363,19 +378,40 @@ def collect_referenced_candidates(
 
 def build_output_payload(
     details: dict[int, ApiObject],
-    candidates_by_id: dict[int, tuple[StepCandidate, ...]],
+    build_result: BuildResult,
     *,
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
+    show_progress: bool = False,
 ) -> dict[str, Any]:
     _, bit_to_id = build_id_bit_maps(details)
+    candidates_by_id = build_result.routes
     records_by_id: dict[int, dict[tuple[int, int], StepCandidate]] = {}
-    for object_id, candidates in candidates_by_id.items():
+    started_at = time.time()
+    last_report = 0.0
+    total_candidates = len(candidates_by_id)
+
+    def report_payload_progress(phase: str, index: int, total: int) -> None:
+        print(
+            f"\r整理最少步数输出 {phase} {index}/{total} | "
+            f"耗时 {time.time() - started_at:6.1f}s | "
+            f"输出对象 {len(records_by_id)}",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    for index, (object_id, candidates) in enumerate(candidates_by_id.items(), start=1):
         if object_id not in details:
             continue
         for candidate in candidates:
             collect_referenced_candidates(object_id, candidate, details=details, records_by_id=records_by_id)
+        if show_progress:
+            now = time.time()
+            if now - last_report >= 1.0 or index == total_candidates:
+                last_report = now
+                report_payload_progress("候选闭包", index, total_candidates)
 
     steps = {
         str(object_id): step_record(
@@ -386,12 +422,19 @@ def build_output_payload(
         for object_id in sorted(records_by_id)
         if object_id in details
     }
+    if show_progress:
+        report_payload_progress("JSON记录", len(steps), len(records_by_id))
+        print(file=sys.stderr, flush=True)
     return {
         "version": 1,
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "base_ids": sorted(base_ids),
         "base_names": sorted(base_names),
         "candidate_limit": candidate_limit,
+        "converged": build_result.converged,
+        "remaining_queue": build_result.remaining_queue,
+        "evaluations": build_result.evaluations,
+        "max_evaluations": build_result.max_evaluations,
         "step_count": len(steps),
         "steps": steps,
     }
@@ -456,7 +499,7 @@ def self_test() -> None:
         "craft_sources": [{"operation": "add", "ingredient_a": steam, "ingredient_b": steam}],
     }
     details = {1: water, 2: fire, 10: steam, 11: engine}
-    routes = build_shortest_steps(
+    build_result = build_shortest_steps(
         details,
         base_ids={1, 2},
         base_names={"水", "火"},
@@ -464,8 +507,9 @@ def self_test() -> None:
         max_iterations=10,
         show_progress=False,
     )
-    assert best_candidate(routes[10]).steps == 1
-    assert best_candidate(routes[11]).steps == 2
+    assert build_result.converged
+    assert best_candidate(build_result.routes[10]).steps == 1
+    assert best_candidate(build_result.routes[11]).steps == 2
 
 
 def main() -> None:
@@ -489,7 +533,7 @@ def main() -> None:
         details = load_detail_cache(str(args.cache_dir))
         base_names = parse_name_set(str(args.base_names))
         base_ids = resolve_base_ids(details, base_ids=parse_int_set(str(args.base_ids)), base_names=base_names)
-        routes = build_shortest_steps(
+        build_result = build_shortest_steps(
             details,
             base_ids=base_ids,
             base_names=base_names,
@@ -499,10 +543,11 @@ def main() -> None:
         )
         payload = build_output_payload(
             details,
-            routes,
+            build_result,
             base_ids=base_ids,
             base_names=base_names,
             candidate_limit=int(args.candidate_limit),
+            show_progress=True,
         )
         output_path = str(args.output) if args.output else os.path.join(str(args.cache_dir), SHORTEST_STEPS_FILE)
         write_json(output_path, payload, show_progress=True)

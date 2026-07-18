@@ -35,6 +35,8 @@ python build_shortest_steps.py --self-test
 - 算法从基础元素开始做离线传播：某个对象的路线变好后，只重新检查依赖它的配方，不再每轮全量扫描所有配方。
 - 每个对象最多保留 `--candidate-limit` 条非支配候选路线，避免空间爆炸。
 - 内部用 bitmask 表示 `required_ids`，把候选合并和支配判断压成整数位运算；输出 JSON 仍保持 `required_ids` 列表格式。
+- 构建进度分三段显示：配方传播、最少步数输出整理、JSON 写入。
+- 输出 JSON 会记录 `converged`、`remaining_queue`、`evaluations` 和 `max_evaluations`；如果结束时队列没清空，`converged=false`。
 - `--candidate-limit 1` 最快；`4` 通常很快，默认 `8` 更保守也更慢。
 - 输出时会补齐被父路线引用到的子候选闭包，保证查询树和顺序表使用同一条候选路线。
 - 如果外部同步了新物品或新配方，先运行 `sync_cache.py`，再重新运行本脚本。
