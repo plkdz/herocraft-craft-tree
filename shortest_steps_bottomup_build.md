@@ -6,6 +6,9 @@
 
 ```powershell
 python shortest_steps_bottomup_build.py
+# 第一遍：生成启发表
+python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 999
+# 第二遍：使用第一遍的 steps/required_ids 做预排序后重建
 python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 999
 python shortest_steps_bottomup_build.py --self-test
 ```
@@ -34,6 +37,7 @@ python shortest_steps_bottomup_build.py --self-test
 - 这是独立的自下而上最少步数表构建器，不影响 `shortest_depth_tree.py` 默认最短深度渲染。
 - 算法从基础元素开始做离线传播：某个对象的路线变好后，只重新检查依赖它的配方，不再每轮全量扫描所有配方。
 - 构建前会对“结果 -> 材料”依赖图做强连通分量预处理，并结合旧表步数标记同环边、非降阶边；还会用旧表 `required_ids` 对同一产物的配方做严格支配判断。标记不会删除配方边，只会影响队列顺序，避免有限迭代先耗在大环和被支配配方上。
+- 推荐连续运行两遍：第一遍生成可用旧表，第二遍用第一遍的 `steps/required_ids` 做预排序后重新构建。旧表只提供排序启发，不会直接混入本次输出结果。
 - 每个对象最多保留 `--candidate-limit` 条非支配候选路线，避免空间爆炸。
 - 内部用 bitmask 表示 `required_ids`，把候选合并和支配判断压成整数位运算；输出 JSON 仍保持 `required_ids` 列表格式。
 - 构建进度分三段显示：配方传播、最少步数输出整理、JSON 写入。
