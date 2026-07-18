@@ -40,10 +40,9 @@ def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
 
 
 def known_shortest_steps_paths(path: str) -> list[str]:
-    candidates = [
-        path,
-        f"{path}.gz",
-    ]
+    if os.path.exists(path):
+        return [path]
+    candidates = [f"{path}.gz"]
     result: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -114,28 +113,39 @@ def known_route_still_valid(
     *,
     details: dict[int, ApiObject],
     known_steps: dict[int, dict[str, Any]],
+    memo: dict[tuple[int, tuple[int | None, tuple[int, ...]]], bool],
     visiting: frozenset[int] = frozenset(),
 ) -> bool:
+    memo_key = (object_id, candidate_key(route))
+    cached = memo.get(memo_key)
+    if cached is not None:
+        return cached
     if object_id in visiting:
         return True
     recipe = route.get("recipe")
     if recipe is None:
-        return object_id in details
+        result = object_id in details
+        memo[memo_key] = result
+        return result
     if not isinstance(recipe, dict) or not route_recipe_exists(details, object_id, recipe):
+        memo[memo_key] = False
         return False
     ids = recipe_ids(route)
     if ids is None:
+        memo[memo_key] = False
         return False
     left_id, right_id = ids
     left_route = child_route(recipe, "ingredient_a_required_ids", "ingredient_a_steps", left_id, known_steps)
     right_route = child_route(recipe, "ingredient_b_required_ids", "ingredient_b_steps", right_id, known_steps)
     next_visiting = visiting | {object_id}
-    return (
+    result = (
         left_route is not None
         and right_route is not None
-        and known_route_still_valid(left_id, left_route, details=details, known_steps=known_steps, visiting=next_visiting)
-        and known_route_still_valid(right_id, right_route, details=details, known_steps=known_steps, visiting=next_visiting)
+        and known_route_still_valid(left_id, left_route, details=details, known_steps=known_steps, memo=memo, visiting=next_visiting)
+        and known_route_still_valid(right_id, right_route, details=details, known_steps=known_steps, memo=memo, visiting=next_visiting)
     )
+    memo[memo_key] = result
+    return result
 
 
 def load_shortest_steps_summary(path: str) -> tuple[set[int], set[int], set[str], int]:
@@ -239,6 +249,7 @@ def preserve_known_shorter_steps(
     last_report = 0.0
     total_count = len(old_steps)
     invalid_count = 0
+    validity_memo: dict[tuple[int, tuple[int | None, tuple[int, ...]]], bool] = {}
     for index, (object_id, old_route) in enumerate(old_steps.items(), start=1):
         old_steps_value = old_route.get("steps")
         if not isinstance(old_steps_value, int):
@@ -247,7 +258,7 @@ def preserve_known_shorter_steps(
         new_route = raw_steps.get(raw_id)
         new_steps_value = new_route.get("steps") if isinstance(new_route, dict) else None
         should_preserve = not isinstance(new_steps_value, int) or new_steps_value >= old_steps_value
-        if should_preserve and not known_route_still_valid(object_id, old_route, details=details, known_steps=old_steps):
+        if should_preserve and not known_route_still_valid(object_id, old_route, details=details, known_steps=old_steps, memo=validity_memo):
             invalid_count += 1
             should_preserve = False
         if should_preserve:
@@ -260,7 +271,8 @@ def preserve_known_shorter_steps(
             print(
                 f"\r检查旧路线保护 {index}/{total_count} | "
                 f"耗时 {now - started_at:6.1f}s | "
-                f"保留 {preserved_count} | 失效 {invalid_count} | 闭包候选 {len(processed)}",
+                f"保留 {preserved_count} | 失效 {invalid_count} | "
+                f"验证缓存 {len(validity_memo)} | 闭包候选 {len(processed)} | #{object_id}",
                 end="",
                 file=sys.stderr,
                 flush=True,
@@ -269,7 +281,8 @@ def preserve_known_shorter_steps(
         print(
             f"\r检查旧路线保护 {total_count}/{total_count} | "
             f"耗时 {time.time() - started_at:6.1f}s | "
-            f"保留 {preserved_count} | 失效 {invalid_count} | 闭包候选 {len(processed)}",
+            f"保留 {preserved_count} | 失效 {invalid_count} | "
+            f"验证缓存 {len(validity_memo)} | 闭包候选 {len(processed)}",
             file=sys.stderr,
             flush=True,
         )

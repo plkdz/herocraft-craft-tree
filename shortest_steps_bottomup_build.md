@@ -26,6 +26,7 @@ python shortest_steps_bottomup_build.py --self-test
 - `--base-ids` 额外指定基础元素 id。
 - `--candidate-limit` 控制每个对象最多保留多少条非支配候选路线。
 - `--max-iterations` 控制队列传播的最大等价迭代轮数。
+- `--preserve-old-routes true` 写回前递归验证并保留旧表中仍有效且不更差的路线；默认关闭，因为这一步会额外扫描旧路线闭包，普通全量构建优先保持速度。
 - `--self-test` 只运行内置自检，不读取缓存。
 - 构建时会在命令行输出耗时、已检查配方数、基础可达对象数和当前队列长度。
 
@@ -39,7 +40,7 @@ python shortest_steps_bottomup_build.py --self-test
 - 构建进度分三段显示：配方传播、最少步数输出整理、JSON 写入。
 - 输出 JSON 会记录 `converged`、`remaining_queue`、`evaluations` 和 `max_evaluations`；如果结束时队列没清空，`converged=false`。
 - `--candidate-limit 1` 最快；`4` 通常很快，默认 `8` 更保守也更慢。
-- 输出时会补齐被父路线引用到的子候选闭包，保证查询树和顺序表使用同一条候选路线。
+- 输出时会补齐本次构建结果里被父路线引用到的子候选闭包，保证查询树和顺序表使用同一条候选路线。
 - 如果外部同步了新物品或新配方，先运行 `sync_cache.py`，再重新运行本脚本。
 
 关键函数：
