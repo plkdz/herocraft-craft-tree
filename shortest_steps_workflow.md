@@ -38,7 +38,7 @@ python sync_cache.py
 推荐命令：
 
 ```powershell
-python build_shortest_steps.py --candidate-limit 32 --max-iterations 999
+python shortest_steps_bottomup_build.py --candidate-limit 32 --max-iterations 999
 ```
 
 输出：
@@ -51,6 +51,7 @@ python build_shortest_steps.py --candidate-limit 32 --max-iterations 999
 - JSON 必须记录 `converged`、`remaining_queue`、`evaluations` 和 `max_evaluations`。
 - 如果 `converged=false`，说明固定上限内传播没有收敛，这张表只能作为不完整缓存。
 - 即使 `converged=true`，由于存在 `candidate-limit` 裁剪，也只能说明“有界候选算法收敛”，不能证明全局严格最优。
+- 构建器会预处理依赖图强连通分量，并把同环边、非降阶边、旧表已知被支配的配方边排到队列后面；这是排序优化，不会删除配方边，也不使用固定“配方多/有效少”阈值作为硬约束。
 
 通过条件：
 
@@ -88,6 +89,8 @@ python shortest_steps_unreachable.py --dynamic-refresh true
 推荐方向：
 
 - 全局表继续作为启发式缓存。
+- 全局候选表由 `shortest_steps_bottomup_build.py` 自下而上生成。
+- 目标观察和后续单目标搜索由 `shortest_steps_topdown_probe.py` 自上而下展开。
 - 查询具体目标时，以当前已知步数作为上界做目标导向搜索。
 - 在有限时间内只接受严格更短路线。
 - 搜索结果应标注是否证明最优；如果没有证明，只能称为“当前找到的最好路线”。
@@ -103,7 +106,7 @@ python shortest_steps_unreachable.py --dynamic-refresh true
 
 ```powershell
 python sync_cache.py
-python build_shortest_steps.py --candidate-limit 32 --max-iterations 999
+python shortest_steps_bottomup_build.py --candidate-limit 32 --max-iterations 999
 python shortest_steps_unreachable.py --dynamic-refresh true
 ```
 
@@ -111,4 +114,5 @@ python shortest_steps_unreachable.py --dynamic-refresh true
 
 ```powershell
 python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
+python shortest_steps_topdown_probe.py 野兽先辈 生物
 ```
