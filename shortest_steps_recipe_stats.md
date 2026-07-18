@@ -14,5 +14,16 @@ python shortest_steps_recipe_stats.py --min-recipes 20 --max-effective 4
 - 只读取 `.herocraft_cache/object_details.json` 和 `.herocraft_cache/shortest_steps.json`，不请求网络。
 - 对每个产物统计配方总数、旧表可闭合配方数、被 `required_ids` 集合支配的配方数、剩余有效配方数、同强连通分量配方数和缺路线配方数。
 - “被支配”表示同一个产物下，某条配方按旧表材料路线得到的依赖集合包含了另一条配方的依赖集合，因此通常不可能贡献更短候选。
+- 默认排序使用非线性搜索风险分：
+
+```text
+risk_score =
+log2(recipe_count + 1)
+* log2(effective_recipe_count + 1)
+* (1 + dominated_ratio)
+* (1 + same_component_ratio)
+```
+
+- 这个分数同时覆盖“多数配方没用”的噪声型对象和“有效分支很多”的膨胀型对象。
 - 默认不使用硬阈值，只按连续分数排序输出；`--min-recipes` 和 `--max-effective` 只是人工查看时的过滤条件。
 - 输出 HTML 方便人工看，JSON 方便后续 build 或 probe 读取。

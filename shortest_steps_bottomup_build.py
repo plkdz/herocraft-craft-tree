@@ -4,13 +4,15 @@ from __future__ import annotations
 #
 # 常用命令：
 # python shortest_steps_bottomup_build.py
-# python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 999
+# python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
 # python shortest_steps_bottomup_build.py --self-test
 
 import argparse
 import contextlib
 import datetime as dt
+import heapq
 import json
+import math
 import os
 import shutil
 import sys
@@ -59,6 +61,7 @@ class BuildResult:
     remaining_queue: int
     evaluations: int
     max_evaluations: int
+    search_candidate_limit: int
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,8 @@ class EdgePreprocessStats:
     same_component_edges: int
     non_descending_edges: int
     dominated_edges: int
+    top_risk_result_id: int | None
+    top_risk_score: float
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,7 +80,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-ids", default="", help="额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default=",".join(sorted(DEFAULT_BASE_NAMES)), help="基础元素名称，逗号分隔")
     parser.add_argument("--candidate-limit", type=int, default=8, help="每个对象最多保留的非支配候选路线数")
-    parser.add_argument("--max-iterations", type=int, default=999, help="最大固定点迭代轮数")
+    parser.add_argument("--search-candidate-limit", type=int, default=0, help="内部搜索候选上限；0 表示等于 candidate-limit")
+    parser.add_argument("--max-iterations", type=int, default=99999, help="最大固定点迭代轮数")
     parser.add_argument("--self-test", action="store_true", help="运行内置自检，不读取缓存")
     return parser.parse_args()
 
@@ -146,21 +152,57 @@ def mask_is_subset(left: int, right: int) -> bool:
     return left | right == right
 
 
-def prune_candidates(candidates: list[StepCandidate], *, limit: int) -> tuple[StepCandidate, ...]:
+def mask_weight(mask: int, weights_by_bit: list[int]) -> int:
+    score = 0
+    remaining = mask
+    while remaining:
+        low_bit = remaining & -remaining
+        bit_index = low_bit.bit_length() - 1
+        if bit_index < len(weights_by_bit):
+            score += weights_by_bit[bit_index]
+        remaining ^= low_bit
+    return score
+
+
+def prune_candidates(candidates: list[StepCandidate], *, limit: int, weights_by_bit: list[int] | None = None) -> tuple[StepCandidate, ...]:
     unique: dict[int, StepCandidate] = {}
     for candidate in candidates:
-        unique.setdefault(candidate.required_mask, candidate)
+        existing = unique.get(candidate.required_mask)
+        if existing is None or candidate.steps < existing.steps:
+            unique[candidate.required_mask] = candidate
+    pool_limit = max(limit * 8, 128)
     kept: list[StepCandidate] = []
-    for candidate in sorted(unique.values(), key=candidate_sort_key):
+    for candidate in sorted(unique.values(), key=candidate_sort_key)[:pool_limit]:
         if any(
             existing.steps <= candidate.steps and mask_is_subset(existing.required_mask, candidate.required_mask)
             for existing in kept
         ):
             continue
         kept.append(candidate)
-        if len(kept) >= limit:
+    if weights_by_bit is None or len(kept) <= limit:
+        return tuple(kept[:limit])
+    diversity_slots = max(1, limit // 8)
+    selected = kept[: max(1, limit - diversity_slots)]
+    selected_keys = {(candidate.steps, candidate.required_mask) for candidate in selected}
+    for candidate in sorted(kept, key=lambda item: (-mask_weight(item.required_mask, weights_by_bit), item.steps, item.required_mask)):
+        key = (candidate.steps, candidate.required_mask)
+        if key in selected_keys:
+            continue
+        selected.append(candidate)
+        selected_keys.add(key)
+        if len(selected) >= limit:
             break
-    return tuple(kept)
+    return tuple(sorted(selected, key=candidate_sort_key))
+
+
+def dependency_weights_by_bit(old_required_ids_by_id: dict[int, set[int]], id_to_bit: dict[int, int]) -> list[int]:
+    weights = [0] * len(id_to_bit)
+    for required_ids in old_required_ids_by_id.values():
+        for object_id in required_ids:
+            bit_index = id_to_bit.get(object_id)
+            if bit_index is not None:
+                weights[bit_index] += 1
+    return weights
 
 
 def build_recipe_edges(details: dict[int, ApiObject]) -> tuple[RecipeEdge, ...]:
@@ -251,7 +293,10 @@ def edge_preprocess_key(
     component_by_id: dict[int, int],
     component_sizes: dict[int, int],
     dominated_edge_indexes: set[int],
-) -> tuple[int, int, int]:
+    result_risk_scores: dict[int, float],
+    edge_estimated_costs: dict[int, int],
+    edge_required_sizes: dict[int, int],
+) -> tuple[int, int, int, int, int, int, float, int, int]:
     result_steps = old_steps_by_id.get(edge.result_id)
     ingredient_steps = tuple(
         ingredient_upper_bound(ingredient, old_steps_by_id=old_steps_by_id, base_ids=base_ids, base_names=base_names)
@@ -266,22 +311,15 @@ def edge_preprocess_key(
     missing = sum(1 for steps in ingredient_steps if steps is None)
     non_descending = result_steps is not None and any(steps is not None and steps >= result_steps for steps in ingredient_steps)
     dominated = edge_index in dominated_edge_indexes
-    if result_steps is None:
-        priority = 0
-    elif not same_component and not non_descending and missing == 0:
-        priority = 1
-    elif missing:
-        priority = 2
-    elif dominated:
-        priority = 3
-    elif same_component:
-        priority = 4
-    elif non_descending:
-        priority = 5
-    else:
-        priority = 6
+    missing_rank = 1 if missing else 0
+    estimated_cost = edge_estimated_costs.get(edge_index, 999_999)
+    required_size = edge_required_sizes.get(edge_index, 999_999)
+    dominated_rank = 1 if dominated else 0
+    non_descending_rank = 1 if non_descending else 0
+    same_component_rank = 1 if same_component else 0
     known_sum = sum(steps if steps is not None else 999_999 for steps in ingredient_steps)
-    return priority, known_sum, edge.result_id
+    risk_penalty = result_risk_scores.get(edge.result_id, 0.0) if dominated or same_component or non_descending or missing else 0.0
+    return missing_rank, required_size, estimated_cost, dominated_rank, non_descending_rank, same_component_rank, risk_penalty, known_sum, edge.result_id
 
 
 def ingredient_required_ids(
@@ -310,13 +348,36 @@ def edge_known_required_ids(
     return {edge.result_id, *left, *right}
 
 
-def recipe_dominance_marks(
+def search_risk_score(
+    *,
+    recipe_count: int,
+    known_recipe_count: int,
+    dominated_recipe_count: int,
+    effective_recipe_count: int,
+    same_component_recipe_count: int,
+) -> float:
+    if recipe_count <= 0:
+        return 0.0
+    dominated_ratio = dominated_recipe_count / max(1, known_recipe_count)
+    same_component_ratio = same_component_recipe_count / recipe_count
+    return (
+        math.log2(recipe_count + 1)
+        * math.log2(effective_recipe_count + 1)
+        * (1.0 + dominated_ratio)
+        * (1.0 + same_component_ratio)
+    )
+
+
+def recipe_dominance_marks_and_risk(
     edges: tuple[RecipeEdge, ...],
     *,
+    old_steps_by_id: dict[int, int],
     old_required_ids_by_id: dict[int, set[int]],
     base_ids: set[int],
     base_names: set[str],
-) -> set[int]:
+    component_by_id: dict[int, int],
+    component_sizes: dict[int, int],
+) -> tuple[set[int], dict[int, float], dict[int, int], dict[int, int]]:
     edges_by_result: defaultdict[int, list[tuple[int, set[int] | None]]] = defaultdict(list)
     for index, edge in enumerate(edges):
         edges_by_result[edge.result_id].append(
@@ -332,8 +393,20 @@ def recipe_dominance_marks(
         )
 
     dominated_edge_indexes: set[int] = set()
+    result_risk_scores: dict[int, float] = {}
+    edge_estimated_costs: dict[int, int] = {}
+    edge_required_sizes: dict[int, int] = {}
+    for index, edge in enumerate(edges):
+        ingredient_steps = [
+            ingredient_upper_bound(ingredient, old_steps_by_id=old_steps_by_id, base_ids=base_ids, base_names=base_names)
+            for ingredient in (edge.source["ingredient_a"], edge.source["ingredient_b"])
+        ]
+        if all(steps is not None for steps in ingredient_steps):
+            edge_estimated_costs[index] = 1 + sum(steps for steps in ingredient_steps if steps is not None)
     for result_id, edge_sets in edges_by_result.items():
         known_sets = [(index, required_ids) for index, required_ids in edge_sets if required_ids is not None]
+        for index, required_ids in known_sets:
+            edge_required_sizes[index] = len(required_ids)
         for index, required_ids in known_sets:
             for other_index, other_required_ids in known_sets:
                 if other_index == index:
@@ -341,8 +414,26 @@ def recipe_dominance_marks(
                 if other_required_ids <= required_ids and (len(other_required_ids) < len(required_ids) or other_index < index):
                     dominated_edge_indexes.add(index)
                     break
-        _ = result_id
-    return dominated_edge_indexes
+        same_component_recipe_count = 0
+        result_component = component_by_id.get(result_id, -1)
+        for index, _ in edge_sets:
+            edge = edges[index]
+            if any(
+                component_by_id.get(ingredient_id, -2) == result_component
+                and (component_sizes.get(result_component, 0) > 1 or ingredient_id == result_id)
+                for ingredient_id in edge.ingredient_ids
+            ):
+                same_component_recipe_count += 1
+        dominated_count = sum(1 for index, _ in known_sets if index in dominated_edge_indexes)
+        effective_count = len(known_sets) - dominated_count
+        result_risk_scores[result_id] = search_risk_score(
+            recipe_count=len(edge_sets),
+            known_recipe_count=len(known_sets),
+            dominated_recipe_count=dominated_count,
+            effective_recipe_count=effective_count,
+            same_component_recipe_count=same_component_recipe_count,
+        )
+    return dominated_edge_indexes, result_risk_scores, edge_estimated_costs, edge_required_sizes
 
 
 def edge_preprocess_stats(
@@ -352,6 +443,7 @@ def edge_preprocess_stats(
     component_by_id: dict[int, int],
     component_sizes: dict[int, int],
     dominated_edge_indexes: set[int],
+    result_risk_scores: dict[int, float],
 ) -> EdgePreprocessStats:
     same_component_edges = 0
     non_descending_edges = 0
@@ -371,10 +463,18 @@ def edge_preprocess_stats(
             if ingredient_steps is not None and ingredient_steps >= result_steps:
                 non_descending_edges += 1
                 break
+    top_risk_result_id: int | None = None
+    top_risk_score = 0.0
+    for result_id, score in result_risk_scores.items():
+        if score > top_risk_score:
+            top_risk_result_id = result_id
+            top_risk_score = score
     return EdgePreprocessStats(
         same_component_edges=same_component_edges,
         non_descending_edges=non_descending_edges,
         dominated_edges=len(dominated_edge_indexes),
+        top_risk_result_id=top_risk_result_id,
+        top_risk_score=top_risk_score,
     )
 
 
@@ -387,6 +487,7 @@ def source_candidates(
     base_names: set[str],
     candidate_limit: int,
     result_bit: int,
+    weights_by_bit: list[int] | None,
 ) -> tuple[StepCandidate, ...]:
     options: list[tuple[StepCandidate, ...]] = []
     for ingredient in (source["ingredient_a"], source["ingredient_b"]):
@@ -410,7 +511,7 @@ def source_candidates(
                     ingredient_candidates=(left, right),
                 )
             )
-    return prune_candidates(candidates, limit=candidate_limit)
+    return prune_candidates(candidates, limit=candidate_limit, weights_by_bit=weights_by_bit)
 
 
 def edge_candidates(
@@ -421,6 +522,7 @@ def edge_candidates(
     base_names: set[str],
     candidate_limit: int,
     id_to_bit: dict[int, int],
+    weights_by_bit: list[int] | None,
 ) -> tuple[StepCandidate, ...]:
     return source_candidates(
         edge.source,
@@ -430,6 +532,7 @@ def edge_candidates(
         base_names=base_names,
         candidate_limit=candidate_limit,
         result_bit=1 << id_to_bit[edge.result_id],
+        weights_by_bit=weights_by_bit,
     )
 
 
@@ -439,6 +542,7 @@ def build_shortest_steps(
     base_ids: set[int],
     base_names: set[str],
     candidate_limit: int,
+    search_candidate_limit: int | None = None,
     max_iterations: int,
     show_progress: bool,
     old_steps_by_id: dict[int, int] | None = None,
@@ -448,6 +552,9 @@ def build_shortest_steps(
         old_steps_by_id = {}
     if old_required_ids_by_id is None:
         old_required_ids_by_id = {}
+    effective_search_limit = search_candidate_limit or candidate_limit
+    if effective_search_limit < candidate_limit:
+        effective_search_limit = candidate_limit
     id_to_bit, _ = build_id_bit_maps(details)
     candidates_by_id: dict[int, tuple[StepCandidate, ...]] = {
         object_id: (StepCandidate(0, 0, None),)
@@ -456,11 +563,14 @@ def build_shortest_steps(
     }
     edges = build_recipe_edges(details)
     component_by_id, component_sizes = build_dependency_components(details)
-    dominated_edge_indexes = recipe_dominance_marks(
+    dominated_edge_indexes, result_risk_scores, edge_estimated_costs, edge_required_sizes = recipe_dominance_marks_and_risk(
         edges,
+        old_steps_by_id=old_steps_by_id,
         old_required_ids_by_id=old_required_ids_by_id,
         base_ids=base_ids,
         base_names=base_names,
+        component_by_id=component_by_id,
+        component_sizes=component_sizes,
     )
     preprocess_stats = edge_preprocess_stats(
         edges,
@@ -468,10 +578,10 @@ def build_shortest_steps(
         component_by_id=component_by_id,
         component_sizes=component_sizes,
         dominated_edge_indexes=dominated_edge_indexes,
+        result_risk_scores=result_risk_scores,
     )
-    edge_order = sorted(
-        range(len(edges)),
-        key=lambda index: edge_preprocess_key(
+    edge_keys = [
+        edge_preprocess_key(
             edges[index],
             edge_index=index,
             old_steps_by_id=old_steps_by_id,
@@ -480,37 +590,36 @@ def build_shortest_steps(
             component_by_id=component_by_id,
             component_sizes=component_sizes,
             dominated_edge_indexes=dominated_edge_indexes,
-        ),
-    )
+            result_risk_scores=result_risk_scores,
+            edge_estimated_costs=edge_estimated_costs,
+            edge_required_sizes=edge_required_sizes,
+        )
+        for index in range(len(edges))
+    ]
+    use_priority_queue = bool(old_steps_by_id)
+    edge_order = sorted(range(len(edges)), key=edge_keys.__getitem__) if use_priority_queue else list(range(len(edges)))
     dependent_edges: defaultdict[int, list[int]] = defaultdict(list)
     for index, edge in enumerate(edges):
         for ingredient_id in edge.ingredient_ids:
             dependent_edges[ingredient_id].append(index)
-    for indexes in dependent_edges.values():
-        indexes.sort(
-            key=lambda index: edge_preprocess_key(
-                edges[index],
-                edge_index=index,
-                old_steps_by_id=old_steps_by_id,
-                base_ids=base_ids,
-                base_names=base_names,
-                component_by_id=component_by_id,
-                component_sizes=component_sizes,
-                dominated_edge_indexes=dominated_edge_indexes,
-            )
-        )
+    if use_priority_queue:
+        for indexes in dependent_edges.values():
+            indexes.sort(key=edge_keys.__getitem__)
 
     if show_progress and old_steps_by_id:
         print(
             f"预处理配方边：{len(edges)} 条 | "
             f"同环边 {preprocess_stats.same_component_edges} | "
             f"非降阶边 {preprocess_stats.non_descending_edges} | "
-            f"支配边 {preprocess_stats.dominated_edges}",
+            f"支配边 {preprocess_stats.dominated_edges} | "
+            f"最高风险 #{preprocess_stats.top_risk_result_id or '-'} {preprocess_stats.top_risk_score:.1f}",
             file=sys.stderr,
             flush=True,
         )
 
-    queue: deque[int] = deque(edge_order)
+    queue = [(edge_keys[edge_index], edge_index) for edge_index in edge_order] if use_priority_queue else deque(edge_order)
+    if use_priority_queue:
+        heapq.heapify(queue)
     queued = set(edge_order)
     max_evaluations = max_iterations * max(1, len(edges))
     evaluations = 0
@@ -518,18 +627,22 @@ def build_shortest_steps(
     last_report = 0.0
 
     def report_progress() -> None:
+        converged_label = "已收敛" if not queue else "传播中"
         print(
             f"\r耗时 {time.time() - started_at:6.1f}s | "
             f"检查配方 {evaluations} | "
             f"基础可达 {len(candidates_by_id)}/{len(details)} | "
-            f"队列 {len(queue)}",
+            f"队列 {len(queue)} | {converged_label}",
             end="",
             file=sys.stderr,
             flush=True,
         )
 
     while queue and evaluations < max_evaluations:
-        edge_index = queue.popleft()
+        if use_priority_queue:
+            _, edge_index = heapq.heappop(queue)
+        else:
+            edge_index = queue.popleft()
         queued.discard(edge_index)
         edge = edges[edge_index]
         evaluations += 1
@@ -540,11 +653,12 @@ def build_shortest_steps(
                 candidates_by_id=candidates_by_id,
                 base_ids=base_ids,
                 base_names=base_names,
-                candidate_limit=candidate_limit,
+                candidate_limit=effective_search_limit,
                 id_to_bit=id_to_bit,
+                weights_by_bit=None,
             )
         )
-        pruned = prune_candidates(candidates, limit=candidate_limit)
+        pruned = prune_candidates(candidates, limit=effective_search_limit)
         if not pruned or pruned == candidates_by_id.get(edge.result_id):
             if show_progress:
                 now = time.time()
@@ -555,7 +669,10 @@ def build_shortest_steps(
         candidates_by_id[edge.result_id] = pruned
         for dependent_edge_index in dependent_edges.get(edge.result_id, ()):
             if dependent_edge_index not in queued:
-                queue.append(dependent_edge_index)
+                if use_priority_queue:
+                    heapq.heappush(queue, (edge_keys[dependent_edge_index], dependent_edge_index))
+                else:
+                    queue.append(dependent_edge_index)
                 queued.add(dependent_edge_index)
         if show_progress:
             now = time.time()
@@ -571,6 +688,7 @@ def build_shortest_steps(
         remaining_queue=len(queue),
         evaluations=evaluations,
         max_evaluations=max_evaluations,
+        search_candidate_limit=effective_search_limit,
     )
 
 
@@ -651,6 +769,10 @@ def build_output_payload(
 ) -> dict[str, Any]:
     _, bit_to_id = build_id_bit_maps(details)
     candidates_by_id = build_result.routes
+    output_candidates_by_id = {
+        object_id: prune_candidates(list(candidates), limit=candidate_limit)
+        for object_id, candidates in candidates_by_id.items()
+    }
     records_by_id: dict[int, dict[tuple[int, int], StepCandidate]] = {}
     started_at = time.time()
     last_report = 0.0
@@ -666,7 +788,7 @@ def build_output_payload(
             flush=True,
         )
 
-    for index, (object_id, candidates) in enumerate(candidates_by_id.items(), start=1):
+    for index, (object_id, candidates) in enumerate(output_candidates_by_id.items(), start=1):
         if object_id not in details:
             continue
         for candidate in candidates:
@@ -695,6 +817,7 @@ def build_output_payload(
         "base_ids": sorted(base_ids),
         "base_names": sorted(base_names),
         "candidate_limit": candidate_limit,
+        "search_candidate_limit": build_result.search_candidate_limit,
         "converged": build_result.converged,
         "remaining_queue": build_result.remaining_queue,
         "evaluations": build_result.evaluations,
@@ -800,8 +923,19 @@ def self_test() -> None:
         show_progress=False,
     )
     assert build_result.converged
+    assert build_result.search_candidate_limit == 8
     assert best_candidate(build_result.routes[10]).steps == 1
     assert best_candidate(build_result.routes[11]).steps == 2
+    shared_candidate = StepCandidate(3, 0b111000, None)
+    short_candidate = StepCandidate(1, 0b000001, None)
+    other_short_candidate = StepCandidate(2, 0b000010, None)
+    diverse = prune_candidates(
+        [short_candidate, other_short_candidate, shared_candidate],
+        limit=2,
+        weights_by_bit=[0, 0, 0, 10, 10, 10],
+    )
+    assert short_candidate in diverse
+    assert shared_candidate in diverse
     loop_a: ApiObject = {
         "id": 20,
         "name": "环甲",
@@ -819,21 +953,52 @@ def self_test() -> None:
     assert component_by_id[20] == component_by_id[21]
     assert component_sizes[component_by_id[20]] == 2
     loop_edges = build_recipe_edges(loop_details)
-    dominated_edges = recipe_dominance_marks(
+    dominated_edges, result_risk_scores, edge_estimated_costs, edge_required_sizes = recipe_dominance_marks_and_risk(
         loop_edges,
+        old_steps_by_id={20: 3, 21: 1},
         old_required_ids_by_id={20: {20, 21}, 21: {20, 21}},
         base_ids={1, 2},
         base_names={"水", "火"},
+        component_by_id=component_by_id,
+        component_sizes=component_sizes,
     )
     stats = edge_preprocess_stats(
         loop_edges,
-        old_steps_by_id={20: 3, 21: 4},
+        old_steps_by_id={20: 3, 21: 1},
         component_by_id=component_by_id,
         component_sizes=component_sizes,
         dominated_edge_indexes=dominated_edges,
+        result_risk_scores=result_risk_scores,
     )
     assert stats.same_component_edges == 2
     assert stats.non_descending_edges == 1
+    normal_key = edge_preprocess_key(
+        loop_edges[0],
+        edge_index=0,
+        old_steps_by_id={20: 3, 21: 1},
+        base_ids={1, 2},
+        base_names={"水", "火"},
+        component_by_id={20: 20, 21: 21},
+        component_sizes={20: 1, 21: 1},
+        dominated_edge_indexes=set(),
+        result_risk_scores={20: 100.0},
+        edge_estimated_costs={0: 2},
+        edge_required_sizes={0: 2},
+    )
+    dominated_key = edge_preprocess_key(
+        loop_edges[0],
+        edge_index=0,
+        old_steps_by_id={20: 3, 21: 1},
+        base_ids={1, 2},
+        base_names={"水", "火"},
+        component_by_id={20: 20, 21: 21},
+        component_sizes={20: 1, 21: 1},
+        dominated_edge_indexes={0},
+        result_risk_scores={20: 100.0},
+        edge_estimated_costs={0: 2},
+        edge_required_sizes={0: 2},
+    )
+    assert normal_key < dominated_key
 
 
 def main() -> None:
@@ -846,6 +1011,8 @@ def main() -> None:
     args = parse_args()
     if args.candidate_limit < 1:
         fail("--candidate-limit 必须大于 0")
+    if args.search_candidate_limit < 0:
+        fail("--search-candidate-limit 不能小于 0")
     if args.max_iterations < 1:
         fail("--max-iterations 必须大于 0")
     if args.self_test:
@@ -864,6 +1031,7 @@ def main() -> None:
             base_ids=base_ids,
             base_names=base_names,
             candidate_limit=int(args.candidate_limit),
+            search_candidate_limit=int(args.search_candidate_limit) or None,
             max_iterations=int(args.max_iterations),
             show_progress=True,
             old_steps_by_id=old_steps_by_id,
@@ -880,6 +1048,7 @@ def main() -> None:
         write_json(output_path, payload, show_progress=True)
         print(f"已写入：{output_path}")
         print(f"基础可达对象：{payload['step_count']} / {len(details)}")
+        print(f"收敛状态：{'已收敛' if build_result.converged else '未收敛'}；剩余队列：{build_result.remaining_queue}")
     except RuntimeError as exc:
         fail(str(exc))
 

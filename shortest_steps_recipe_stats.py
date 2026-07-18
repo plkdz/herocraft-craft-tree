@@ -14,6 +14,7 @@ from typing import Any
 
 from herocraft_core import CACHE_DIR, DEFAULT_BASE_NAMES, RESULTS_DIR, ApiObject, CraftSource, fail, format_object, is_base_object, iter_sources, parse_bool, parse_int_set, parse_name_set, require_id
 from shortest_steps_bottomup_build import SHORTEST_STEPS_FILE, build_dependency_components, load_detail_cache, resolve_base_ids
+from shortest_steps_bottomup_build import search_risk_score
 from shortest_steps_rebuild import load_shortest_steps_payload
 
 
@@ -147,9 +148,13 @@ def collect_recipe_stats(
         effective_recipe_count = known_recipe_count - dominated_recipe_count
         recipe_count = len(sources)
         same_component_count = same_component_recipe_count(object_id, sources, component_by_id=component_by_id, component_sizes=component_sizes)
-        denominator = max(1, effective_recipe_count)
-        dominated_ratio = dominated_recipe_count / max(1, known_recipe_count)
-        score = recipe_count * (1.0 + dominated_ratio) / denominator
+        score = search_risk_score(
+            recipe_count=recipe_count,
+            known_recipe_count=known_recipe_count,
+            dominated_recipe_count=dominated_recipe_count,
+            effective_recipe_count=effective_recipe_count,
+            same_component_recipe_count=same_component_count,
+        )
         stats.append(
             ObjectRecipeStats(
                 object_id=object_id,
@@ -215,7 +220,7 @@ def write_html(path: str, rows: list[ObjectRecipeStats], *, title: str) -> None:
 </head>
 <body>
   <h1>{html.escape(title)}</h1>
-  <p class="hint">分数越高，越像“配方很多但有效候选很少”的搜索膨胀点。</p>
+  <p class="hint">分数越高，搜索风险越高；公式同时考虑配方总量、有效分支、被支配比例和同环比例。</p>
   <table>
     <thead><tr><th>对象</th><th>配方</th><th>可闭合</th><th>被支配</th><th>有效</th><th>同环</th><th>缺路线</th><th>旧步数</th><th>分数</th></tr></thead>
     <tbody>{table_rows}</tbody>

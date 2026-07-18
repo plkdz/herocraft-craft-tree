@@ -52,7 +52,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--requests-per-minute", type=float, default=50.0, help="动态刷新每分钟详情请求数")
     parser.add_argument("--retry-rounds", type=int, default=5, help="动态刷新单个详情失败重试次数")
     parser.add_argument("--candidate-limit", type=int, default=8, help="动态重算每个对象最多保留候选数")
-    parser.add_argument("--max-iterations", type=int, default=999, help="动态重算最大迭代轮数")
+    parser.add_argument("--max-iterations", type=int, default=99999, help="动态重算最大迭代轮数")
     return parser.parse_args()
 
 

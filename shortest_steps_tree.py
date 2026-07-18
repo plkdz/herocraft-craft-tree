@@ -77,7 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-ids", default="", help="动态重算额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default="水,火,土,风", help="动态重算基础元素名称，逗号分隔")
     parser.add_argument("--candidate-limit", type=int, default=8, help="动态重算每个对象最多保留候选数")
-    parser.add_argument("--max-iterations", type=int, default=999, help="动态重算最大迭代轮数")
+    parser.add_argument("--max-iterations", type=int, default=99999, help="动态重算最大迭代轮数")
     return parser.parse_args()
 
 

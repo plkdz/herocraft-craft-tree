@@ -7,9 +7,9 @@
 ```powershell
 python shortest_steps_bottomup_build.py
 # 第一遍：生成启发表
-python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 999
+python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
 # 第二遍：使用第一遍的 steps/required_ids 做预排序后重建
-python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 999
+python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
 python shortest_steps_bottomup_build.py --self-test
 ```
 
@@ -30,13 +30,15 @@ python shortest_steps_bottomup_build.py --self-test
 - `--candidate-limit` 控制每个对象最多保留多少条非支配候选路线。
 - `--max-iterations` 控制队列传播的最大等价迭代轮数。
 - `--self-test` 只运行内置自检，不读取缓存。
-- 构建时会在命令行输出耗时、已检查配方数、基础可达对象数和当前队列长度。
+- 构建时会在命令行输出耗时、已检查配方数、基础可达对象数、当前队列长度和收敛状态。
 
 算法边界：
 
 - 这是独立的自下而上最少步数表构建器，不影响 `shortest_depth_tree.py` 默认最短深度渲染。
 - 算法从基础元素开始做离线传播：某个对象的路线变好后，只重新检查依赖它的配方，不再每轮全量扫描所有配方。
 - 构建前会对“结果 -> 材料”依赖图做强连通分量预处理，并结合旧表步数标记同环边、非降阶边；还会用旧表 `required_ids` 对同一产物的配方做严格支配判断。标记不会删除配方边，只会影响队列顺序，避免有限迭代先耗在大环和被支配配方上。
+- 预排序先按旧表 `required_ids` 闭包规模估计哪条配方更容易展开，再用 `1 + A步数 + B步数` 做同级辅助排序；非线性 `risk_score` 只用于未知但不完整、被支配、同环、非降阶等非正常边的二级排序。
+- 没有旧表启发时使用原始 FIFO 队列，避免静态优先级压慢第一遍可达扩散；读取到旧表后才启用优先队列。
 - 推荐连续运行两遍：第一遍生成可用旧表，第二遍用第一遍的 `steps/required_ids` 做预排序后重新构建。旧表只提供排序启发，不会直接混入本次输出结果。
 - 每个对象最多保留 `--candidate-limit` 条非支配候选路线，避免空间爆炸。
 - 内部用 bitmask 表示 `required_ids`，把候选合并和支配判断压成整数位运算；输出 JSON 仍保持 `required_ids` 列表格式。
