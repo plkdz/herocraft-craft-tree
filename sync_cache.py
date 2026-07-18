@@ -59,6 +59,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--missing-only", action="store_true", help="只补齐本机没有详情缓存的对象")
     parser.add_argument("--requests-per-minute", type=float, default=50.0, help="每分钟对象详情请求数")
     parser.add_argument("--retry-rounds", type=int, default=3, help="详情失败重试轮数")
+    parser.add_argument("--start-index", type=int, default=1, help="从去重后的详情请求列表第几个对象开始同步，1 表示从头开始")
+    parser.add_argument("--only-ids", default="", help="只同步指定对象 id，逗号分隔；设置后不按物品栏生成详情列表")
     return parser.parse_args()
 
 
@@ -67,6 +69,23 @@ def unique_inventory_ids(items: list[ApiObject]) -> list[int]:
     object_ids: list[int] = []
     for item in items:
         object_id = require_id(item)
+        if object_id in seen:
+            continue
+        seen.add(object_id)
+        object_ids.append(object_id)
+    return object_ids
+
+
+def parse_only_ids(raw_value: str) -> list[int]:
+    object_ids: list[int] = []
+    seen: set[int] = set()
+    for part in raw_value.split(","):
+        value = part.strip()
+        if not value:
+            continue
+        if not value.isdigit():
+            raise RuntimeError(f"--only-ids 里不是正整数：{value}")
+        object_id = int(value)
         if object_id in seen:
             continue
         seen.add(object_id)
@@ -122,16 +141,18 @@ def refresh_details(
     detail_delay: float,
     retry_rounds: int,
     log_file: TextIO,
+    start_index: int,
+    total_count: int,
 ) -> list[DetailFailure]:
     if client.max_workers <= 1 or len(object_ids) <= 1:
         failures: list[DetailFailure] = []
         started_at = time.time()
-        total_count = len(object_ids)
         for index, object_id in enumerate(object_ids, 1):
-            remaining_seconds = (total_count - index) * detail_delay
+            global_index = start_index + index - 1
+            remaining_seconds = (len(object_ids) - index) * detail_delay
             print(
                 f"\r同步详情 | "
-                f"{index}/{total_count} | "
+                f"{global_index}/{total_count} | "
                 f"耗时 {format_seconds(time.time() - started_at)} | "
                 f"预计剩余 {format_seconds(remaining_seconds)} | "
                 f"#{object_id}",
@@ -164,6 +185,8 @@ def main() -> None:
         fail("--requests-per-minute 必须大于 0")
     if args.retry_rounds < 1:
         fail("--retry-rounds 必须大于 0")
+    if args.start_index < 1:
+        fail("--start-index 必须大于 0")
     detail_delay = 60.0 / float(args.requests_per_minute)
     log_file = open_log_file()
     log_line(log_file, f"sync start cache_dir={args.cache_dir} missing_only={args.missing_only} rpm={args.requests_per_minute} retry_rounds={args.retry_rounds}")
@@ -192,17 +215,41 @@ def main() -> None:
             progress=progress,
         )
 
-        progress.phase = "同步物品栏"
-        log_line(log_file, "inventory start")
-        inventory = client.my_objects()
-        log_line(log_file, f"inventory ok count={len(inventory)}")
-        object_ids = unique_inventory_ids(inventory)
-        if args.missing_only:
-            object_ids = missing_detail_ids(client, object_ids)
-            log_line(log_file, f"missing only detail_count={len(object_ids)}")
-        print(f"\n物品栏对象：{len(inventory)} 个；去重后详情请求：{len(object_ids)} 个", file=sys.stderr)
+        only_ids = parse_only_ids(str(args.only_ids))
+        if only_ids:
+            inventory: list[ApiObject] = []
+            object_ids = only_ids
+            log_line(log_file, f"only ids detail_count={len(object_ids)} ids={','.join(str(object_id) for object_id in object_ids)}")
+        else:
+            progress.phase = "同步物品栏"
+            log_line(log_file, "inventory start")
+            inventory = client.my_objects()
+            log_line(log_file, f"inventory ok count={len(inventory)}")
+            object_ids = unique_inventory_ids(inventory)
+            if args.missing_only:
+                object_ids = missing_detail_ids(client, object_ids)
+                log_line(log_file, f"missing only detail_count={len(object_ids)}")
+        total_detail_count = len(object_ids)
+        if args.start_index > total_detail_count + 1:
+            fail(f"--start-index 超出详情请求列表：{args.start_index} > {total_detail_count + 1}")
+        if args.start_index > 1:
+            object_ids = object_ids[int(args.start_index) - 1:]
+            log_line(log_file, f"resume start_index={args.start_index} remaining_detail_count={len(object_ids)} original_detail_count={total_detail_count}")
+        print(
+            f"\n物品栏对象：{len(inventory)} 个；详情请求：{total_detail_count} 个；"
+            f"本次从第 {args.start_index} 个开始，请求 {len(object_ids)} 个",
+            file=sys.stderr,
+        )
         progress.phase = "同步对象详情"
-        failures = refresh_details(client, object_ids, detail_delay=detail_delay, retry_rounds=int(args.retry_rounds), log_file=log_file)
+        failures = refresh_details(
+            client,
+            object_ids,
+            detail_delay=detail_delay,
+            retry_rounds=int(args.retry_rounds),
+            log_file=log_file,
+            start_index=int(args.start_index),
+            total_count=total_detail_count,
+        )
         log_line(log_file, f"details done failures={len(failures)}")
         log_line(log_file, "save cache start")
         client.save_cache()
