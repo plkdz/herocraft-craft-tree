@@ -41,6 +41,7 @@ from herocraft_core import (
     require_id,
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
+from shortest_steps_context_repair import repair_target_routes
 from shortest_steps_order_render import build_order_html_document, collect_order_steps, order_output_path_for, render_order_text
 from shortest_steps_rebuild import load_shortest_steps, load_shortest_steps_payload, rebuild_shortest_steps_cache, resolve_rebuild_candidate_limit
 from shortest_steps_render import build_html_document, child_route, output_path_for, recipe_ids, render_steps_tree_text
@@ -78,6 +79,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-names", default="水,火,土,风", help="动态重算基础元素名称，逗号分隔")
     parser.add_argument("--candidate-limit", type=int, default=8, help="动态重算每个对象最多保留候选数")
     parser.add_argument("--max-iterations", type=int, default=99999, help="动态重算最大迭代轮数")
+    parser.add_argument("--context-repair", nargs="?", const=True, default=False, type=parse_bool, help="用目标上下文局部重组候选，不写回全局缓存")
+    parser.add_argument("--context-limit", type=int, default=24, help="上下文局部修复每个节点保留候选数")
+    parser.add_argument("--context-depth", type=int, default=8, help="上下文局部修复最大递归深度")
+    parser.add_argument("--context-extra-steps", type=int, default=4, help="上下文局部修复允许中间节点比旧表多出的步数")
     return parser.parse_args()
 
 
@@ -511,6 +516,12 @@ def main() -> None:
         fail("--requests-per-minute 必须大于 0")
     if args.max_iterations < 1:
         fail("--max-iterations 必须大于 0")
+    if args.context_limit < 1:
+        fail("--context-limit 必须大于 0")
+    if args.context_depth < 0:
+        fail("--context-depth 不能小于 0")
+    if args.context_extra_steps < 0:
+        fail("--context-extra-steps 不能小于 0")
     try:
         if args.dynamic_refresh:
             refresh_inventory_for_dynamic(args)
@@ -527,14 +538,46 @@ def main() -> None:
             details = load_detail_cache(str(args.cache_dir))
         target_id = require_id(target)
         step = steps_table.get(target_id)
+        used_context_repair = False
         if step is None:
             if not args.dynamic_refresh:
                 fail(f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。先同步缓存并运行 python shortest_steps_bottomup_build.py")
             print(f"{format_object(target, show_id=args.show_id)} 不在旧最少步数表里，跳过离线旧结果", file=sys.stderr)
+        if bool(args.context_repair) and step is not None:
+            print(
+                f"开始上下文局部修复：候选上限 {args.context_limit}，深度 {args.context_depth}，中间额外步数 {args.context_extra_steps}；不写回缓存",
+                file=sys.stderr,
+                flush=True,
+            )
+            repair_started_at = time.time()
+            base_names = parse_name_set(str(args.base_names))
+            base_ids = resolve_base_ids(details, base_ids=parse_int_set(str(args.base_ids)), base_names=base_names)
+            repaired = repair_target_routes(
+                target_id,
+                details=details,
+                steps_table=steps_table,
+                base_ids=base_ids,
+                base_names=base_names,
+                limit=int(args.context_limit),
+                depth=int(args.context_depth),
+                max_extra_steps=int(args.context_extra_steps),
+                show_progress=True,
+            )
+            steps_table = repaired.steps_table
+            step = steps_table.get(target_id)
+            used_context_repair = repaired.improved
+            print(
+                f"上下文局部修复完成：{repaired.old_steps} -> {repaired.new_steps} | "
+                f"访问节点 {repaired.visited_count} | 递归 {repaired.call_count} | "
+                f"配方 {repaired.recipe_count} | 组合 {repaired.combination_count} | "
+                f"耗时 {time.time() - repair_started_at:6.1f}s",
+                file=sys.stderr,
+                flush=True,
+            )
         output_format: OutputFormat = str(args.format)  # type: ignore[assignment]
         output_path = str(args.output) if args.output else output_path_for(target, output_format)
         if step is not None:
-            print("输出离线旧结果")
+            print("输出上下文修复结果" if used_context_repair else "输出离线旧结果")
             write_result(
                 target=target,
                 details=details,

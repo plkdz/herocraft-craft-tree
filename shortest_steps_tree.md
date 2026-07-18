@@ -15,6 +15,7 @@
 python shortest_steps_tree.py 蒸汽 元素
 python shortest_steps_tree.py 蒸汽 元素 --image
 python shortest_steps_tree.py 末日鱼雷 装备 --show-id --image
+python shortest_steps_tree.py 野兽先辈 生物 --context-repair true
 python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
 ```
 
@@ -37,6 +38,13 @@ python shortest_steps_bottomup_build.py
 - `--image-output` 指定 PNG 输出路径，默认跟 HTML 同名。
 - `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸。
 - `--dynamic-refresh true/false` 控制是否先输出旧结果，再刷新旧路线相关对象详情；如果配方没有变化，会跳过最少步数全量重算。裸 `--dynamic-refresh` 仍等价于 `true`。
+- `--context-repair true/false` 控制是否在查询目标时做一次上下文局部修复；它只读本地缓存，不请求网络，也不写回 `.herocraft_cache/shortest_steps.json`。
+- `--context-limit`、`--context-depth`、`--context-extra-steps` 控制局部修复的候选宽度、递归深度和中间节点允许比旧表多出的步数。
+- `--context-limit` 默认 `24`，影响最大；它决定每个中间节点最多保留多少条上下文候选。值太小会漏掉共享路线，值太大会明显变慢。
+- `--context-depth` 默认 `8`，影响第二；它决定从目标往材料方向最多重组多少层。深度不够时看不到更深的共享前置链。
+- `--context-extra-steps` 默认 `4`，影响第三；它允许中间物品比旧表最短路线多几步，用来保留“本节点局部更长，但和目标另一分支共享后总步数更短”的路线。
+- 上下文修复运行时会显示进度，包含耗时、访问节点、缓存状态、递归次数、配方次数和候选组合次数。
+- 上下文修复调参优先级通常是 `context-limit > context-depth > context-extra-steps`。如果找不到更短路线，先把 `--context-limit` 从 `24` 提到 `32`、`48` 或 `64`，再考虑增加 `--context-depth`。
 - `--candidate-limit` 只影响动态重算；默认 `8`。写回前会按对象做单调合并：旧表已有且不更差的路线直接保留，只接收新增或严格更短的新路线，并递归补回旧路线依赖的子候选。
 - `--dynamic-min-expand` 控制即使配方未变化也继续扩散刷新几层，`--dynamic-max-expand` 控制变化链最多扩散几层。
 - 动态刷新会验证旧最少步数路线是否仍存在；如果旧路线仍有效，动态重算结果变差时会拒绝覆盖最少步数缓存。
@@ -48,6 +56,7 @@ python shortest_steps_bottomup_build.py
 - 输出 HTML 时会保留旧树状图，并额外写出同目录同时间戳的 `_tree_steps_order-时间戳.html` 合成顺序表。
 - 根节点输出目标最少步数的保守估计；命令行会同时输出顺序表实际最小步数。
 - 每个节点只按持久化表里步数最少的那一个 `recipe` 继续展开，不显示其它候选线路。
+- 开启 `--context-repair true` 后，会先用目标上下文重组局部候选，再按修复后的内存表输出；这用于处理“某个中间物品自身路线略长，但能和目标另一分支共享大量前置”的情况。
 - 同一对象全局只展开一次；后续再次出现时保留节点，并提示“全局去重：已在其他位置展开”。
 - 基础元素显示 `保守估计步数 0 | 基础元素`。
 - 如果目标不在最少步数表里，说明当前缓存下无法从基础元素合成，或需要重新运行 `sync_cache.py` 和 `shortest_steps_bottomup_build.py`。
@@ -60,3 +69,4 @@ python shortest_steps_bottomup_build.py
 - `route_still_valid()`：递归验证旧路线里的每条配方在当前详情缓存中是否仍存在。
 - `dynamic_refresh_details()`：沿旧路线刷新目标相关对象详情，并统计配方变化数量。
 - `write_result()`：写出树状 HTML/text 和合成顺序表。
+- `repair_target_routes()`：来自 `shortest_steps_context_repair.py`，只对当前目标做上下文局部候选修复。
