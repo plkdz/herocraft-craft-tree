@@ -12,14 +12,12 @@ import datetime as dt
 import json
 import os
 import sys
+import time
 from typing import Any
 
 from build_shortest_steps import (
     SHORTEST_STEPS_FILE,
-    build_output_payload,
-    build_shortest_steps,
     load_detail_cache,
-    resolve_base_ids,
     write_json,
 )
 from herocraft_client import ClientConfig, HeroCraftClient
@@ -31,6 +29,12 @@ from shortest_depth_tree import (
     collect_unreachable_leaf_blockers,
     score_unreachable_blockers,
 )
+from shortest_steps_rebuild import (
+    load_shortest_steps_summary,
+    rebuild_shortest_steps_cache,
+    resolve_rebuild_candidate_limit,
+)
+from shortest_steps_cycle_render import build_cycle_html_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,25 +47,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cookie", default=os.environ.get("HEROCRAFT_SESSION", ""), help=f"hc_session；也可用环境变量或 {SESSION_FILE}")
     parser.add_argument("--base-url", default=BASE_URL, help="API 基址")
     parser.add_argument("--timeout", type=float, default=15.0, help="动态刷新单次请求超时秒数")
+    parser.add_argument("--requests-per-minute", type=float, default=50.0, help="动态刷新每分钟详情请求数")
+    parser.add_argument("--retry-rounds", type=int, default=5, help="动态刷新单个详情失败重试次数")
     parser.add_argument("--candidate-limit", type=int, default=8, help="动态重算每个对象最多保留候选数")
     parser.add_argument("--max-iterations", type=int, default=999, help="动态重算最大迭代轮数")
     return parser.parse_args()
-
-
-def load_shortest_steps_summary(path: str) -> tuple[set[int], set[int], set[str]]:
-    with open(path, "r", encoding="utf-8") as file:
-        payload: Any = json.load(file)
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"{path} 不是最少步数表。先运行 python build_shortest_steps.py")
-    raw_steps = payload.get("steps")
-    if raw_steps is None:
-        raw_steps = payload.get("routes")
-    if not isinstance(raw_steps, dict):
-        raise RuntimeError(f"{path} 不是最少步数表。先运行 python build_shortest_steps.py")
-    reachable_ids = {int(raw_id) for raw_id in raw_steps if isinstance(raw_id, str) and raw_id.isdigit()}
-    base_ids = {int(value) for value in payload.get("base_ids", []) if isinstance(value, int)}
-    base_names = {str(value) for value in payload.get("base_names", []) if isinstance(value, str) and value.strip()}
-    return reachable_ids, base_ids, base_names
 
 
 def collect_steps_unreachable_ids(
@@ -70,12 +60,31 @@ def collect_steps_unreachable_ids(
     *,
     base_ids: set[int],
     base_names: set[str],
+    show_progress: bool,
+    started_at: float | None = None,
 ) -> set[int]:
-    return {
-        object_id
-        for object_id, obj in details.items()
-        if object_id not in reachable_ids and not is_base_object(obj, base_ids=base_ids, base_names=base_names)
-    }
+    unreachable_ids: set[int] = set()
+    total_count = len(details)
+    progress_started_at = time.perf_counter() if started_at is None else started_at
+    last_report = 0.0
+    for index, (object_id, obj) in enumerate(details.items(), start=1):
+        if object_id not in reachable_ids and not is_base_object(obj, base_ids=base_ids, base_names=base_names):
+            unreachable_ids.add(object_id)
+        if show_progress:
+            now = time.perf_counter()
+            if now - last_report >= 0.5 or index == total_count:
+                last_report = now
+                print(
+                    f"\r统计不可达对象 {index}/{total_count} | "
+                    f"耗时 {now - progress_started_at:6.1f}s | "
+                    f"已发现 {len(unreachable_ids)}",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
+    if show_progress:
+        print(file=sys.stderr, flush=True)
+    return unreachable_ids
 
 
 def default_output_path() -> str:
@@ -90,10 +99,98 @@ def text_output_path(html_output_path: str) -> str:
     return f"{stem}.txt"
 
 
+def output_path_with_label(output_path: str, label: str) -> str:
+    stem, extension = os.path.splitext(output_path)
+    return f"{stem}{label}{extension or '.html'}"
+
+
+def cycle_output_path(output_path: str) -> str:
+    return output_path_with_label(output_path, "_cycles")
+
+
 def craft_sources_key(obj: ApiObject | None) -> str:
     if obj is None:
         return ""
     return json.dumps(obj.get("craft_sources", []), ensure_ascii=False, sort_keys=True)
+
+
+def refresh_object_detail_with_retry(
+    client: HeroCraftClient,
+    object_id: int,
+    *,
+    retry_rounds: int,
+    retry_delay: float,
+) -> ApiObject | None:
+    for retry_index in range(retry_rounds + 1):
+        try:
+            return client.refresh_object_detail(object_id)
+        except RuntimeError as exc:
+            if "HTTP 403" in str(exc):
+                print(f"\n#{object_id} 详情刷新被拒绝，跳过：{exc}", file=sys.stderr, flush=True)
+                return None
+            if retry_index >= retry_rounds:
+                print(f"\n#{object_id} 详情刷新重试耗尽，跳过：{exc}", file=sys.stderr, flush=True)
+                return None
+            print(
+                f"\n#{object_id} 详情刷新失败，{retry_delay:.1f}s 后重试 {retry_index + 1}/{retry_rounds}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if retry_delay > 0:
+                time.sleep(retry_delay)
+    raise RuntimeError(f"#{object_id} 重试后仍未成功")
+
+
+def sync_missing_inventory_details(args: argparse.Namespace) -> None:
+    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+    if not cookie:
+        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session")
+    client = HeroCraftClient(
+        ClientConfig(
+            base_url=str(args.base_url).rstrip("/"),
+            session_cookie=cookie,
+            timeout_seconds=float(args.timeout),
+            max_workers=8,
+            branch_workers=1,
+            deep_workers=1,
+            request_limit=8,
+            cache_dir=str(args.cache_dir),
+            refresh_cache=False,
+            refresh_inventory=True,
+        )
+    )
+    inventory = client.my_objects()
+    detail_cache = client.detail_cache_snapshot()
+    missing_ids = [require_id(obj) for obj in inventory if require_id(obj) not in detail_cache]
+    print(f"动态刷新：物品栏对象 {len(inventory)} 个，缺详情 {len(missing_ids)} 个", file=sys.stderr)
+    if not missing_ids:
+        client.save_cache()
+        return
+    detail_delay = 60.0 / float(args.requests_per_minute)
+    started_at = time.time()
+    inventory_by_id = {require_id(obj): obj for obj in inventory}
+    for index, object_id in enumerate(missing_ids, start=1):
+        obj = inventory_by_id.get(object_id)
+        remaining_seconds = (len(missing_ids) - index) * detail_delay
+        print(
+            f"\r动态刷新补齐缺失详情 {index}/{len(missing_ids)} | "
+            f"耗时 {time.time() - started_at:6.1f}s | "
+            f"预计剩余 {remaining_seconds:6.1f}s | "
+            f"{format_object(obj, show_id=True) if obj else f'#{object_id}'}",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+        refresh_object_detail_with_retry(
+            client,
+            object_id,
+            retry_rounds=int(args.retry_rounds),
+            retry_delay=detail_delay,
+        )
+        if detail_delay > 0 and index < len(missing_ids):
+            time.sleep(detail_delay)
+    print(file=sys.stderr, flush=True)
+    client.save_cache()
 
 
 def refresh_inventory_and_unreachable_details(args: argparse.Namespace, unreachable_ids: set[int]) -> tuple[set[int], int]:
@@ -120,18 +217,39 @@ def refresh_inventory_and_unreachable_details(args: argparse.Namespace, unreacha
     removed_ids = unreachable_ids - inventory_ids
     refreshed_ids = sorted(unreachable_ids & inventory_ids)
     changed_count = 0
+    skipped_count = 0
+    detail_delay = 60.0 / float(args.requests_per_minute)
+    started_at = time.time()
     for index, object_id in enumerate(refreshed_ids, start=1):
         before = detail_cache.get(object_id)
+        remaining_seconds = (len(refreshed_ids) - index) * detail_delay
         print(
-            f"\r动态刷新不可达详情 {index}/{len(refreshed_ids)} | {format_object(before, show_id=True) if before else f'#{object_id}'}",
+            f"\r动态刷新不可达详情 {index}/{len(refreshed_ids)} | "
+            f"耗时 {time.time() - started_at:6.1f}s | "
+            f"预计剩余 {remaining_seconds:6.1f}s | "
+            f"变更 {changed_count} | "
+            f"跳过 {skipped_count} | "
+            f"{format_object(before, show_id=True) if before else f'#{object_id}'}",
             end="",
             file=sys.stderr,
             flush=True,
         )
-        after = client.refresh_object_detail(object_id)
+        after = refresh_object_detail_with_retry(
+            client,
+            object_id,
+            retry_rounds=int(args.retry_rounds),
+            retry_delay=detail_delay,
+        )
+        if after is None:
+            skipped_count += 1
+            if detail_delay > 0 and index < len(refreshed_ids):
+                time.sleep(detail_delay)
+            continue
         if craft_sources_key(before) != craft_sources_key(after):
             changed_count += 1
             detail_cache[object_id] = after
+        if detail_delay > 0 and index < len(refreshed_ids):
+            time.sleep(detail_delay)
     if refreshed_ids:
         print(file=sys.stderr, flush=True)
     if not removed_ids:
@@ -148,33 +266,59 @@ def refresh_inventory_and_unreachable_details(args: argparse.Namespace, unreacha
     return removed_ids, changed_count
 
 
-def rebuild_shortest_steps_cache(
-    details: dict[int, ApiObject],
-    steps_path: str,
+def write_unreachable_outputs(
     *,
-    base_ids: set[int],
-    base_names: set[str],
-    candidate_limit: int,
-    max_iterations: int,
-) -> tuple[set[int], set[int], set[str]]:
-    resolved_base_ids = resolve_base_ids(details, base_ids=base_ids, base_names=base_names)
-    routes = build_shortest_steps(
-        details,
-        base_ids=resolved_base_ids,
-        base_names=base_names,
-        candidate_limit=candidate_limit,
-        max_iterations=max_iterations,
-        show_progress=True,
-    )
-    payload = build_output_payload(
-        details,
-        routes,
-        base_ids=resolved_base_ids,
-        base_names=base_names,
-        candidate_limit=candidate_limit,
-    )
-    write_json(steps_path, payload)
-    return load_shortest_steps_summary(steps_path)
+    details: dict[int, ApiObject],
+    unreachable_ids: set[int],
+    output_path: str,
+    show_id: bool,
+) -> None:
+    started_at = time.perf_counter()
+    print("统计底层阻塞点", file=sys.stderr)
+    blockers = collect_unreachable_leaf_blockers(details, unreachable_ids)
+    blocked_at = time.perf_counter()
+    print(f"底层阻塞点：{len(blockers)} 个 | 耗时 {blocked_at - started_at:6.1f}s | 开始按影响数量排序", file=sys.stderr)
+    scored_blockers = score_unreachable_blockers(details, unreachable_ids, blockers)
+    sorted_at = time.perf_counter()
+    print(f"阻塞点排序完成 | 耗时 {sorted_at - blocked_at:6.1f}s", file=sys.stderr)
+    target: ApiObject = {
+        "id": 0,
+        "name": "当前最少步数表",
+        "type": "concept",
+        "emoji": "📋",
+    }
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as file:
+        file.write(
+            build_blocker_html_report(
+                scored_blockers,
+                target=target,
+                unreachable_count=len(unreachable_ids),
+                show_id=show_id,
+            )
+        )
+    report_path = text_output_path(output_path)
+    with open(report_path, "w", encoding="utf-8") as file:
+        file.write(
+            build_blocker_report(
+                scored_blockers,
+                unreachable_count=len(unreachable_ids),
+                show_id=show_id,
+            )
+        )
+    if unreachable_ids and not scored_blockers:
+        cycles_path = cycle_output_path(output_path)
+        with open(cycles_path, "w", encoding="utf-8") as file:
+            file.write(build_cycle_html_report(details, unreachable_ids, show_id=show_id))
+        print(f"非叶/可能成环不可达对象：{cycles_path}")
+    preview = "，".join(f"{format_object(obj, show_id=show_id)}({len(affected)})" for obj, affected in scored_blockers[:12])
+    suffix = "..." if len(scored_blockers) > 12 else ""
+    print(f"基础不可达对象：{len(unreachable_ids)} 个；底层阻塞点：{len(scored_blockers)} 个")
+    if preview:
+        print(f"按影响数排序：{preview}{suffix}")
+    print(f"已写入：{output_path}")
+    print(f"完整列表：{report_path}")
+    print(f"不可达报告生成完成 | 总耗时 {time.perf_counter() - started_at:6.1f}s", file=sys.stderr)
 
 
 def main() -> None:
@@ -186,78 +330,70 @@ def main() -> None:
         stderr_reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
-    if args.candidate_limit < 1:
-        fail("--candidate-limit 必须大于 0")
     if args.max_iterations < 1:
         fail("--max-iterations 必须大于 0")
+    if args.requests_per_minute <= 0:
+        fail("--requests-per-minute 必须大于 0")
+    if args.retry_rounds < 0:
+        fail("--retry-rounds 不能小于 0")
     try:
         cache_dir = str(args.cache_dir)
         steps_path = str(args.routes) if args.routes else os.path.join(cache_dir, SHORTEST_STEPS_FILE)
+        if args.dynamic_refresh:
+            sync_missing_inventory_details(args)
+        stats_started_at = time.perf_counter()
         details = load_detail_cache(cache_dir)
-        reachable_ids, base_ids, base_names = load_shortest_steps_summary(steps_path)
+        reachable_ids, base_ids, base_names, cached_candidate_limit = load_shortest_steps_summary(steps_path)
+        effective_candidate_limit = resolve_rebuild_candidate_limit(int(args.candidate_limit), cached_candidate_limit)
         unreachable_ids = collect_steps_unreachable_ids(
             details,
             reachable_ids,
             base_ids=base_ids,
             base_names=base_names,
+            show_progress=True,
+            started_at=stats_started_at,
         )
+        output_path = str(args.output) if args.output else default_output_path()
+        show_id = not bool(args.hide_id)
         if args.dynamic_refresh:
+            before_output_path = output_path_with_label(output_path, "_before_refresh")
+            print("动态刷新前先写出当前不可达统计", file=sys.stderr)
+            write_unreachable_outputs(
+                details=details,
+                unreachable_ids=unreachable_ids,
+                output_path=before_output_path,
+                show_id=show_id,
+            )
             removed_ids, changed_count = refresh_inventory_and_unreachable_details(args, unreachable_ids)
             details = load_detail_cache(cache_dir)
             unreachable_ids -= removed_ids
             if changed_count:
                 print(f"动态刷新：不可达对象详情配方变更 {changed_count} 个，开始重算最少步数表", file=sys.stderr)
-                reachable_ids, base_ids, base_names = rebuild_shortest_steps_cache(
+                print(f"动态重算候选上限：{effective_candidate_limit}", file=sys.stderr)
+                reachable_ids, base_ids, base_names, cached_candidate_limit = rebuild_shortest_steps_cache(
                     details,
                     steps_path,
                     base_ids=base_ids,
                     base_names=base_names,
-                    candidate_limit=int(args.candidate_limit),
+                    candidate_limit=effective_candidate_limit,
                     max_iterations=int(args.max_iterations),
                 )
+                stats_started_at = time.perf_counter()
                 unreachable_ids = collect_steps_unreachable_ids(
                     details,
                     reachable_ids,
                     base_ids=base_ids,
                     base_names=base_names,
+                    show_progress=True,
+                    started_at=stats_started_at,
                 )
             print(f"动态刷新：已刷新物品栏，删除不在物品栏里的不可达详情缓存 {len(removed_ids)} 个")
-        blockers = collect_unreachable_leaf_blockers(details, unreachable_ids)
-        scored_blockers = score_unreachable_blockers(details, unreachable_ids, blockers)
-        target: ApiObject = {
-            "id": 0,
-            "name": "当前最少步数表",
-            "type": "concept",
-            "emoji": "📋",
-        }
-        output_path = str(args.output) if args.output else default_output_path()
-        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as file:
-            file.write(
-                build_blocker_html_report(
-                    scored_blockers,
-                    target=target,
-                    unreachable_count=len(unreachable_ids),
-                    show_id=not bool(args.hide_id),
-                )
-            )
-        report_path = text_output_path(output_path)
-        with open(report_path, "w", encoding="utf-8") as file:
-            file.write(
-                build_blocker_report(
-                    scored_blockers,
-                    unreachable_count=len(unreachable_ids),
-                    show_id=not bool(args.hide_id),
-                )
-            )
-        show_id = not bool(args.hide_id)
-        preview = "，".join(f"{format_object(obj, show_id=show_id)}({len(affected)})" for obj, affected in scored_blockers[:12])
-        suffix = "..." if len(scored_blockers) > 12 else ""
-        print(f"基础不可达对象：{len(unreachable_ids)} 个；底层阻塞点：{len(scored_blockers)} 个")
-        if preview:
-            print(f"按影响数排序：{preview}{suffix}")
-        print(f"已写入：{output_path}")
-        print(f"完整列表：{report_path}")
+        write_unreachable_outputs(
+            details=details,
+            unreachable_ids=unreachable_ids,
+            output_path=output_path,
+            show_id=show_id,
+        )
     except RuntimeError as exc:
         fail(str(exc))
 

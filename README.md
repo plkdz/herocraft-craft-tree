@@ -100,8 +100,10 @@ python shortest_steps_unreachable.py
 - [build_shortest_steps.md](build_shortest_steps.md)：离线生成最少合成步数表。
 - [shortest_steps_tree.md](shortest_steps_tree.md)：查询持久化最少步数合成树。
 - [shortest_steps_unreachable.md](shortest_steps_unreachable.md)：统计最少步数表中不可达对象并渲染阻塞点影响图。
+- [shortest_steps_cycle_render.md](shortest_steps_cycle_render.md)：渲染没有叶子阻塞点时的非叶/可能成环不可达对象报告。
 - [shortest_steps_render.md](shortest_steps_render.md)：渲染持久化最少步数树的 text/html 输出。
 - [shortest_steps_order_render.md](shortest_steps_order_render.md)：渲染最少步数路线的合成顺序 HTML。
+- [shortest_steps_rebuild.md](shortest_steps_rebuild.md)：最少步数表摘要读取和动态全量重算公共逻辑。
 - [tree_html_render.md](tree_html_render.md)：统一横向 HTML 树节点、页面和交互渲染。
 - [herocraft_core.md](herocraft_core.md)：共享类型、常量、格式化和进度统计。
 - [herocraft_client.md](herocraft_client.md)：HTTP API、缓存、对象解析。
