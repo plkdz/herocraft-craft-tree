@@ -90,17 +90,15 @@ python shortest_steps_unreachable.py --dynamic-refresh true
 
 - 全局表继续作为启发式缓存。
 - 全局候选表由 `shortest_steps_bottomup_build.py` 自下而上生成。
-- 目标观察和后续单目标搜索由 `shortest_steps_topdown_probe.py` 自上而下展开。
 - 查询具体目标时，以当前已知步数作为上界做目标导向搜索。
 - 在有限时间内只接受严格更短路线。
 - 搜索结果应标注是否证明最优；如果没有证明，只能称为“当前找到的最好路线”。
 
-动态写回原则：
+写回原则：
 
-- 新对象可达：可以加入表。
-- 已有对象严格变短：可以更新。
-- 已有对象等长或变长：保留旧表。
-- 旧路线如果当前详情已验证失效，才允许被替换。
+- 自下而上重算结果直接覆盖 `shortest_steps.json`。
+- 旧表只作为本次构建的队列排序和配方支配统计启发，不做写保护。
+- 需要回退时使用 `.bak` 或 Git 历史。
 
 ## 推荐执行顺序
 
@@ -114,5 +112,4 @@ python shortest_steps_unreachable.py --dynamic-refresh true
 
 ```powershell
 python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
-python shortest_steps_topdown_probe.py 野兽先辈 生物
 ```

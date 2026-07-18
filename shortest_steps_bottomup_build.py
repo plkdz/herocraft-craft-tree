@@ -28,7 +28,6 @@ from herocraft_core import (
     fail,
     is_base_object,
     iter_sources,
-    parse_bool,
     parse_int_set,
     parse_name_set,
     require_id,
@@ -77,7 +76,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-names", default=",".join(sorted(DEFAULT_BASE_NAMES)), help="基础元素名称，逗号分隔")
     parser.add_argument("--candidate-limit", type=int, default=8, help="每个对象最多保留的非支配候选路线数")
     parser.add_argument("--max-iterations", type=int, default=999, help="最大固定点迭代轮数")
-    parser.add_argument("--preserve-old-routes", nargs="?", const=True, default=False, type=parse_bool, help="写回前保留旧表中仍有效且不更差的路线；默认 false")
     parser.add_argument("--self-test", action="store_true", help="运行内置自检，不读取缓存")
     return parser.parse_args()
 
@@ -879,13 +877,6 @@ def main() -> None:
             candidate_limit=int(args.candidate_limit),
             show_progress=True,
         )
-        if bool(args.preserve_old_routes) and os.path.exists(output_path):
-            from shortest_steps_rebuild import load_known_shortest_steps, preserve_known_shorter_steps
-
-            old_steps = load_known_shortest_steps(output_path, show_progress=True)
-            preserved_count = preserve_known_shorter_steps(payload, old_steps, details=details, show_progress=True)
-            if preserved_count:
-                print(f"保留旧表中更短或仍已知的路线：{preserved_count} 个", file=sys.stderr, flush=True)
         write_json(output_path, payload, show_progress=True)
         print(f"已写入：{output_path}")
         print(f"基础可达对象：{payload['step_count']} / {len(details)}")

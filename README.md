@@ -51,7 +51,6 @@ python shortest_steps_bottomup_build.py
 python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 999
 python shortest_steps_tree.py 蒸汽 元素 --image
 python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
-python shortest_steps_topdown_probe.py 野兽先辈 生物
 python shortest_steps_recipe_stats.py
 python shortest_steps_unreachable.py
 ```
@@ -102,7 +101,6 @@ python shortest_steps_unreachable.py
 - [shortest_steps_bottomup_build.md](shortest_steps_bottomup_build.md)：自下而上离线生成最少合成步数表。
 - [build_shortest_steps.md](build_shortest_steps.md)：旧构建命令的兼容入口。
 - [shortest_steps_tree.md](shortest_steps_tree.md)：查询持久化最少步数合成树。
-- [shortest_steps_topdown_probe.md](shortest_steps_topdown_probe.md)：自上而下探测单目标候选路线，并把更短路线写回最少步数表。
 - [shortest_steps_recipe_stats.md](shortest_steps_recipe_stats.md)：统计高扇入但有效候选少的对象，识别搜索膨胀点。
 - [shortest_steps_unreachable.md](shortest_steps_unreachable.md)：统计最少步数表中不可达对象并渲染阻塞点影响图。
 - [shortest_steps_workflow.md](shortest_steps_workflow.md)：从全量同步、候选表构建、可达性检查到后续最短路径优化的推荐流程。
