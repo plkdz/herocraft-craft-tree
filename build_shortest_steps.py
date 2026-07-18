@@ -367,7 +367,14 @@ def write_json(path: str, payload: dict[str, Any]) -> None:
     if os.path.exists(path):
         with contextlib.suppress(OSError):
             shutil.copy2(path, backup_path)
-    os.replace(temp_path, path)
+    for retry_index in range(6):
+        try:
+            os.replace(temp_path, path)
+            return
+        except PermissionError:
+            if retry_index >= 5:
+                raise
+            time.sleep(0.5)
 
 
 def self_test() -> None:

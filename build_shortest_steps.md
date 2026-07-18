@@ -13,6 +13,7 @@ python build_shortest_steps.py --self-test
 输出文件：
 
 - 默认写入 `.herocraft_cache/shortest_steps.json`。
+- 写入时会先生成 `.tmp`，再备份旧文件到 `.bak`，最后替换正式文件；Windows 下如果正式文件被短暂占用，会重试几次，避免计算完成后因瞬时锁文件直接失败。
 - 每个可达对象记录步数最少线路：`steps`、`required_ids`、候选路线和当前选中的直接 `recipe`。
 - `steps` 按“需要合成的非基础产物数量”计算，同一个中间物只算一次。
 - `required_ids` 是 `steps` 的来源，也用于候选去重和回查子路线。
@@ -43,3 +44,4 @@ python build_shortest_steps.py --self-test
 - `build_shortest_steps()`：队列式传播最少步数候选路线。
 - `prune_candidates()`：删除被更小 required set 支配的候选路线。
 - `build_output_payload()`：生成可持久化 JSON。
+- `write_json()`：带 `.tmp`、`.bak` 和短重试的 JSON 落盘。
