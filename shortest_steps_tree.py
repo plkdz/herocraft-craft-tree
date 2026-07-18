@@ -15,7 +15,7 @@ import sys
 import time
 from typing import Any
 
-from build_shortest_steps import (
+from shortest_steps_bottomup_build import (
     SHORTEST_STEPS_FILE,
     load_detail_cache,
     resolve_base_ids,
@@ -529,7 +529,7 @@ def main() -> None:
         step = steps_table.get(target_id)
         if step is None:
             if not args.dynamic_refresh:
-                fail(f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。先同步缓存并运行 python build_shortest_steps.py")
+                fail(f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。先同步缓存并运行 python shortest_steps_bottomup_build.py")
             print(f"{format_object(target, show_id=args.show_id)} 不在旧最少步数表里，跳过离线旧结果", file=sys.stderr)
         output_format: OutputFormat = str(args.format)  # type: ignore[assignment]
         output_path = str(args.output) if args.output else output_path_for(target, output_format)

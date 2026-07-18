@@ -26,5 +26,5 @@
 - `resolve_rebuild_candidate_limit()`：校验命令行候选上限，并返回实际重算候选上限。
 - `preserve_known_shorter_steps()`：写回前保留旧表中更短或新表缺失的路线。
 - `preserve_route_closure()`：递归补回被保留路线依赖的子候选，维持连锁一致性。
-- `rebuild_shortest_steps_cache()`：调用 `build_shortest_steps()` 全量重算，写回 JSON，并返回新表摘要。
+- `rebuild_shortest_steps_cache()`：调用 `shortest_steps_bottomup_build.py` 的自下而上构建逻辑全量重算，写回 JSON，并返回新表摘要。
 - 动态重算会显示配方传播、最少步数输出整理、旧路线保护、JSON 写入四个阶段的进度。

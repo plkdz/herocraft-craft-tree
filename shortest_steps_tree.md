@@ -21,7 +21,7 @@ python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynam
 使用前先生成最少步数表：
 
 ```powershell
-python build_shortest_steps.py
+python shortest_steps_bottomup_build.py
 ```
 
 参数要点：
@@ -50,7 +50,7 @@ python build_shortest_steps.py
 - 每个节点只按持久化表里步数最少的那一个 `recipe` 继续展开，不显示其它候选线路。
 - 同一对象全局只展开一次；后续再次出现时保留节点，并提示“全局去重：已在其他位置展开”。
 - 基础元素显示 `保守估计步数 0 | 基础元素`。
-- 如果目标不在最少步数表里，说明当前缓存下无法从基础元素合成，或需要重新运行 `sync_cache.py` 和 `build_shortest_steps.py`。
+- 如果目标不在最少步数表里，说明当前缓存下无法从基础元素合成，或需要重新运行 `sync_cache.py` 和 `shortest_steps_bottomup_build.py`。
 - 动态刷新只有在检测到配方变化时才会重算并覆盖 `.herocraft_cache/shortest_steps.json`；无变化时旧结果就是当前结果。
 
 关键函数：

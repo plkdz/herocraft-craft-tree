@@ -9,26 +9,30 @@ import sys
 import time
 from typing import Any
 
-from build_shortest_steps import build_output_payload, build_shortest_steps, resolve_base_ids, write_json
+from shortest_steps_bottomup_build import build_output_payload, build_shortest_steps, resolve_base_ids, write_json
 from herocraft_core import ApiObject
 from shortest_steps_render import child_route, recipe_ids
 
 
-def load_shortest_steps_payload(path: str) -> tuple[dict[int, dict[str, Any]], int]:
-    opener = gzip.open if path.endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8") as file:
-        payload: Any = json.load(file)
+def parse_steps_payload(payload: Any, path: str) -> tuple[dict[int, dict[str, Any]], int]:
     raw_steps = payload.get("steps") if isinstance(payload, dict) else None
     if raw_steps is None and isinstance(payload, dict):
         raw_steps = payload.get("routes")
     if not isinstance(raw_steps, dict):
-        raise RuntimeError(f"{path} 不是最少步数表。先运行 python build_shortest_steps.py")
+        raise RuntimeError(f"{path} 不是最少步数表。先运行 python shortest_steps_bottomup_build.py")
     steps: dict[int, dict[str, Any]] = {}
     for raw_id, raw_route in raw_steps.items():
         if isinstance(raw_id, str) and raw_id.isdigit() and isinstance(raw_route, dict):
             steps[int(raw_id)] = raw_route
     candidate_limit = payload.get("candidate_limit") if isinstance(payload, dict) else None
     return steps, candidate_limit if isinstance(candidate_limit, int) and candidate_limit > 0 else 8
+
+
+def load_shortest_steps_payload(path: str) -> tuple[dict[int, dict[str, Any]], int]:
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as file:
+        payload: Any = json.load(file)
+    return parse_steps_payload(payload, path)
 
 
 def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
@@ -137,17 +141,11 @@ def known_route_still_valid(
 def load_shortest_steps_summary(path: str) -> tuple[set[int], set[int], set[str], int]:
     with open(path, "r", encoding="utf-8") as file:
         payload: Any = json.load(file)
-    raw_steps = payload.get("steps") if isinstance(payload, dict) else None
-    if raw_steps is None and isinstance(payload, dict):
-        raw_steps = payload.get("routes")
-    if not isinstance(raw_steps, dict):
-        raise RuntimeError(f"{path} 不是最少步数表。先运行 python build_shortest_steps.py")
-    reachable_ids = {int(raw_id) for raw_id in raw_steps if isinstance(raw_id, str) and raw_id.isdigit()}
+    steps, candidate_limit = parse_steps_payload(payload, path)
+    reachable_ids = set(steps)
     base_ids = {int(value) for value in payload.get("base_ids", []) if isinstance(value, int)}
     base_names = {str(value) for value in payload.get("base_names", []) if isinstance(value, str) and value.strip()}
-    candidate_limit = payload.get("candidate_limit") if isinstance(payload, dict) else None
-    effective_candidate_limit = candidate_limit if isinstance(candidate_limit, int) and candidate_limit > 0 else 8
-    return reachable_ids, base_ids, base_names, effective_candidate_limit
+    return reachable_ids, base_ids, base_names, candidate_limit
 
 
 def resolve_rebuild_candidate_limit(requested_limit: int, cached_limit: int) -> int:
@@ -297,6 +295,15 @@ def rebuild_shortest_steps_cache(
         candidate_limit=candidate_limit,
         max_iterations=max_iterations,
         show_progress=True,
+        old_steps_by_id={
+            object_id: steps
+            for object_id, route in old_steps.items()
+            if isinstance((steps := route.get("steps")), int)
+        },
+        old_required_ids_by_id={
+            object_id: {value for value in route.get("required_ids", []) if isinstance(value, int)}
+            for object_id, route in old_steps.items()
+        },
     )
     payload = build_output_payload(
         details,

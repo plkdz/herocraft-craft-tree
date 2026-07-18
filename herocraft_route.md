@@ -19,4 +19,4 @@
 - 步数候选用“需要合成的非基础对象集合”表示，同一个中间物只算一次。
 - 每个对象最多保留 `MAX_STEP_ROUTE_CANDIDATES` 条非支配候选路线，避免空间爆炸。
 - 这部分目前方便单独删改，不影响默认最短深度路线。
-- 持久化最少步数表由 `build_shortest_steps.py` 负责生成，不塞进 HTML 渲染路径。
+- 持久化最少步数表由 `shortest_steps_bottomup_build.py` 自下而上生成，不塞进 HTML 渲染路径。
