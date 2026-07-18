@@ -15,6 +15,7 @@
 python shortest_steps_tree.py 蒸汽 元素
 python shortest_steps_tree.py 蒸汽 元素 --image
 python shortest_steps_tree.py 末日鱼雷 装备 --show-id --image
+python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh --dynamic-min-expand 0 --dynamic-max-expand 1
 ```
 
 使用前先生成最少步数表：
@@ -35,6 +36,9 @@ python build_shortest_steps.py
 - `--image` 会把旧树状图 HTML 自动全部展开后渲染成完整 PNG，并同时把 `_tree_steps_order-时间戳.html` 顺序表渲染成同名 `.png`。
 - `--image-output` 指定 PNG 输出路径，默认跟 HTML 同名。
 - `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸。
+- `--dynamic-refresh` 会先输出旧结果，再刷新旧路线相关对象详情；如果配方没有变化，会跳过最少步数全量重算。
+- `--candidate-limit` 只影响动态重算；默认 `0` 表示沿用当前最少步数表里的 `candidate_limit`，避免动态刷新把高候选表降级成默认小候选表。
+- `--dynamic-min-expand` 控制即使配方未变化也继续扩散刷新几层，`--dynamic-max-expand` 控制变化链最多扩散几层。
 
 输出逻辑：
 
@@ -46,3 +50,10 @@ python build_shortest_steps.py
 - 同一对象全局只展开一次；后续再次出现时保留节点，并提示“全局去重：已在其他位置展开”。
 - 基础元素显示 `保守估计步数 0 | 基础元素`。
 - 如果目标不在最少步数表里，说明当前缓存下无法从基础元素合成，或需要重新运行 `sync_cache.py` 和 `build_shortest_steps.py`。
+- 动态刷新只有在检测到配方变化时才会重算并覆盖 `.herocraft_cache/shortest_steps.json`；无变化时旧结果就是当前结果。
+
+关键函数：
+
+- `load_shortest_steps_payload()`：读取最少步数表，并同时返回表内记录的候选上限。
+- `dynamic_refresh_details()`：沿旧路线刷新目标相关对象详情，并统计配方变化数量。
+- `write_result()`：写出树状 HTML/text 和合成顺序表。

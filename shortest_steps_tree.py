@@ -75,12 +75,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dynamic-min-expand-depth", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--base-ids", default="", help="动态重算额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default="水,火,土,风", help="动态重算基础元素名称，逗号分隔")
-    parser.add_argument("--candidate-limit", type=int, default=8, help="动态重算每个对象最多保留候选数")
+    parser.add_argument("--candidate-limit", type=int, default=0, help="动态重算每个对象最多保留候选数；默认沿用当前最少步数表")
     parser.add_argument("--max-iterations", type=int, default=999, help="动态重算最大迭代轮数")
     return parser.parse_args()
 
 
-def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
+def load_shortest_steps_payload(path: str) -> tuple[dict[int, dict[str, Any]], int]:
     with open(path, "r", encoding="utf-8") as file:
         payload = json.load(file)
     steps = payload.get("steps") if isinstance(payload, dict) else None
@@ -92,7 +92,12 @@ def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
     for raw_id, raw_route in steps.items():
         if isinstance(raw_id, str) and raw_id.isdigit() and isinstance(raw_route, dict):
             result[int(raw_id)] = raw_route
-    return result
+    candidate_limit = payload.get("candidate_limit") if isinstance(payload, dict) else None
+    return result, candidate_limit if isinstance(candidate_limit, int) and candidate_limit > 0 else 8
+
+
+def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
+    return load_shortest_steps_payload(path)[0]
 
 
 def resolve_cached_object(query: str, item_type: str, details: dict[int, ApiObject], *, by_id: bool = False) -> ApiObject:
@@ -466,8 +471,8 @@ def main() -> None:
         fail("--dynamic-min-expand 不能大于 --dynamic-max-expand")
     if args.requests_per_minute <= 0:
         fail("--requests-per-minute 必须大于 0")
-    if args.candidate_limit < 1:
-        fail("--candidate-limit 必须大于 0")
+    if args.candidate_limit < 0:
+        fail("--candidate-limit 不能小于 0")
     if args.max_iterations < 1:
         fail("--max-iterations 必须大于 0")
     try:
@@ -475,7 +480,8 @@ def main() -> None:
             refresh_inventory_for_dynamic(args)
         details = load_detail_cache(str(args.cache_dir))
         steps_path = str(args.routes) if args.routes else os.path.join(str(args.cache_dir), SHORTEST_STEPS_FILE)
-        steps_table = load_shortest_steps(steps_path)
+        steps_table, cached_candidate_limit = load_shortest_steps_payload(steps_path)
+        effective_candidate_limit = int(args.candidate_limit) if int(args.candidate_limit) > 0 else cached_candidate_limit
         try:
             target = resolve_cached_object(str(args.item), str(args.item_type), details, by_id=bool(args.id))
         except RuntimeError:
@@ -517,6 +523,7 @@ def main() -> None:
             f"开始动态刷新：刷新上限 {args.dynamic_max_refresh} 个对象，"
             f"{args.requests_per_minute:.1f} 请求/分钟；"
             f"从旧最短路径至少扩散 {dynamic_min_depth} 层，变化链最多 {dynamic_max_depth} 层；"
+            f"动态重算候选上限 {effective_candidate_limit}；"
             f"预计剩余时间按当前已发现队列估算",
             file=sys.stderr,
         )
@@ -546,6 +553,9 @@ def main() -> None:
             verbose=bool(args.dynamic_verbose),
         )
         print(f"动态刷新完成：本次详情配方变更对象 {changed_count} 个", file=sys.stderr)
+        if changed_count == 0:
+            print("动态刷新没有发现配方变化，跳过最少步数全量重算", file=sys.stderr)
+            return
         base_names = parse_name_set(str(args.base_names))
         base_ids = resolve_base_ids(refreshed_details, base_ids=parse_int_set(str(args.base_ids)), base_names=base_names)
         print("开始动态重算最少步数", file=sys.stderr)
@@ -553,7 +563,7 @@ def main() -> None:
             refreshed_details,
             base_ids=base_ids,
             base_names=base_names,
-            candidate_limit=int(args.candidate_limit),
+            candidate_limit=effective_candidate_limit,
             max_iterations=int(args.max_iterations),
             show_progress=True,
         )
@@ -562,7 +572,7 @@ def main() -> None:
             routes,
             base_ids=base_ids,
             base_names=base_names,
-            candidate_limit=int(args.candidate_limit),
+            candidate_limit=effective_candidate_limit,
         )
         dynamic_steps = {
             int(raw_id): raw_route
