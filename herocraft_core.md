@@ -15,6 +15,7 @@
 - `format_operation()`：格式化配方操作符。
 - `iter_sources()`：统一读取对象详情里的 `craft_sources`。
 - `is_base_object()`：判断对象是否是基础终止元素。
+- `parse_bool()`：解析命令行布尔值，支持 `true/false`、`1/0`、`yes/no`、`on/off`。
 - `parse_type_filter()`：解析中文或 API 原始类型。
 - `default_output_path()`：生成 `名称-类型_tree-时间戳.*` 形式的默认结果路径。
 - `output_path_with_label_before_timestamp()`：给派生结果文件追加 `_steps`、`_order`、`_blockers` 等标签，并保持时间戳在文件名末尾。

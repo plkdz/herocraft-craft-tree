@@ -212,6 +212,17 @@ def parse_name_set(raw_value: str) -> set[str]:
     return {part.strip() for part in raw_value.split(",") if part.strip()}
 
 
+def parse_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"布尔值只能是 true/false：{value}")
+
+
 def parse_type_filter(raw_value: str) -> set[str] | None:
     raw_value = raw_value.strip()
     if not raw_value:

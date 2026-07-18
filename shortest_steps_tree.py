@@ -34,6 +34,7 @@ from herocraft_core import (
     iter_sources,
     load_session_from_file,
     output_path_with_label_before_timestamp,
+    parse_bool,
     parse_int_set,
     parse_name_set,
     parse_type_filter,
@@ -59,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-output", default="", help="PNG 输出路径；默认跟 HTML 同名")
     parser.add_argument("--image-width", type=int, default=1800, help="截图视口宽度")
     parser.add_argument("--image-height", type=int, default=1000, help="截图视口高度")
-    parser.add_argument("--dynamic-refresh", action="store_true", help="先输出旧结果，再刷新目标相关对象并重算一次")
+    parser.add_argument("--dynamic-refresh", nargs="?", const=True, default=False, type=parse_bool, help="是否先输出旧结果，再刷新目标相关对象并重算一次")
     parser.add_argument("--cookie", default=os.environ.get("HEROCRAFT_SESSION", ""), help=f"hc_session；也可用环境变量或 {SESSION_FILE}")
     parser.add_argument("--base-url", default=BASE_URL, help="API 基址")
     parser.add_argument("--timeout", type=float, default=15.0, help="动态刷新单次请求超时秒数")

@@ -17,4 +17,5 @@
 
 输出文件：
 
-- 主报告路径加 `_cycles` 后缀，例如 `shortest_steps_unreachable-时间戳_cycles.html`。
+- 主报告路径会把 `_cycles` 插到时间戳前，例如 `shortest_steps_unreachable_cycles-时间戳.html`。
+- 如果是刷新前报告，对应文件名类似 `shortest_steps_unreachable_cycles-时间戳_before_refresh.html`。

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import html
 import json
 import os
+import re
 import sys
 import time
 from typing import Any
@@ -21,7 +23,7 @@ from build_shortest_steps import (
     write_json,
 )
 from herocraft_client import ClientConfig, HeroCraftClient
-from herocraft_core import CACHE_DIR, RESULTS_DIR, ApiObject, fail, format_object, is_base_object, safe_filename_part
+from herocraft_core import CACHE_DIR, RESULTS_DIR, ApiObject, fail, format_object, is_base_object, parse_bool, safe_filename_part
 from herocraft_core import BASE_URL, DETAIL_CACHE_FILE, SESSION_FILE, load_session_from_file, require_id
 from shortest_depth_tree import (
     build_blocker_html_report,
@@ -43,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--routes", default="", help=f"最少步数表路径；默认缓存目录下 {SHORTEST_STEPS_FILE}")
     parser.add_argument("--output", default="", help=f"HTML 输出路径；默认写入 {RESULTS_DIR}")
     parser.add_argument("--hide-id", action="store_true", help="在输出里隐藏对象 id")
-    parser.add_argument("--dynamic-refresh", action="store_true", help="先刷新物品栏，并删除不可达对象中已不在物品栏里的详情缓存")
+    parser.add_argument("--dynamic-refresh", nargs="?", const=True, default=False, type=parse_bool, help="是否先刷新物品栏，并删除不可达对象中已不在物品栏里的详情缓存")
     parser.add_argument("--cookie", default=os.environ.get("HEROCRAFT_SESSION", ""), help=f"hc_session；也可用环境变量或 {SESSION_FILE}")
     parser.add_argument("--base-url", default=BASE_URL, help="API 基址")
     parser.add_argument("--timeout", type=float, default=15.0, help="动态刷新单次请求超时秒数")
@@ -105,7 +107,11 @@ def output_path_with_label(output_path: str, label: str) -> str:
 
 
 def cycle_output_path(output_path: str) -> str:
-    return output_path_with_label(output_path, "_cycles")
+    stem, extension = os.path.splitext(output_path)
+    timestamp_match = re.search(r"-(\d{8}-\d{6})", stem)
+    if timestamp_match is None:
+        return f"{stem}_cycles{extension or '.html'}"
+    return f"{stem[:timestamp_match.start()]}_cycles{stem[timestamp_match.start():]}{extension or '.html'}"
 
 
 def craft_sources_key(obj: ApiObject | None) -> str:
@@ -288,15 +294,22 @@ def write_unreachable_outputs(
         "emoji": "📋",
     }
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as file:
-        file.write(
-            build_blocker_html_report(
-                scored_blockers,
-                target=target,
-                unreachable_count=len(unreachable_ids),
-                show_id=show_id,
-            )
+    cycle_path = cycle_output_path(output_path) if unreachable_ids and not scored_blockers else ""
+    blocker_html = build_blocker_html_report(
+        scored_blockers,
+        target=target,
+        unreachable_count=len(unreachable_ids),
+        show_id=show_id,
+    )
+    if cycle_path:
+        cycle_link = html.escape(os.path.basename(cycle_path))
+        cycle_note = (
+            "<p class=\"meta\">底层阻塞点为 0；这些不可达对象可能互相成环，"
+            f"请查看 <a href=\"{cycle_link}\">非叶/可能成环不可达对象报告</a>。</p>"
         )
+        blocker_html = blocker_html.replace("</body>", f"  {cycle_note}\n</body>")
+    with open(output_path, "w", encoding="utf-8") as file:
+        file.write(blocker_html)
     report_path = text_output_path(output_path)
     with open(report_path, "w", encoding="utf-8") as file:
         file.write(
@@ -306,11 +319,10 @@ def write_unreachable_outputs(
                 show_id=show_id,
             )
         )
-    if unreachable_ids and not scored_blockers:
-        cycles_path = cycle_output_path(output_path)
-        with open(cycles_path, "w", encoding="utf-8") as file:
+    if cycle_path:
+        with open(cycle_path, "w", encoding="utf-8") as file:
             file.write(build_cycle_html_report(details, unreachable_ids, show_id=show_id))
-        print(f"非叶/可能成环不可达对象：{cycles_path}")
+        print(f"非叶/可能成环不可达对象：{cycle_path}")
     preview = "，".join(f"{format_object(obj, show_id=show_id)}({len(affected)})" for obj, affected in scored_blockers[:12])
     suffix = "..." if len(scored_blockers) > 12 else ""
     print(f"基础不可达对象：{len(unreachable_ids)} 个；底层阻塞点：{len(scored_blockers)} 个")

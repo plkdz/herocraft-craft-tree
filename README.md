@@ -50,7 +50,7 @@ python sync_cache.py --missing-only
 python build_shortest_steps.py
 python build_shortest_steps.py --candidate-limit 8 --max-iterations 999
 python shortest_steps_tree.py 蒸汽 元素 --image
-python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh --dynamic-min-expand 0 --dynamic-max-expand 1
+python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
 python shortest_steps_unreachable.py
 ```
 
@@ -60,9 +60,9 @@ python shortest_steps_unreachable.py
 
 本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。`shortest_depth_tree.py` 只读本机缓存，不发网络请求；外部配方或物品栏可能更新时，统一用 `sync_cache.py` 全量同步缓存：它会重新拉取已发现物品列表，并按 API 当前限流对去重后的每个对象 id 请求一次详情。需要刷新持久化最少步数表时，再运行 `python build_shortest_steps.py`，输出 `.herocraft_cache/shortest_steps.json`。仓库归档使用压缩后的 `.herocraft_cache/shortest_steps.json.gz`，本机运行仍读取未压缩 JSON。
 
-最少步数树由 `shortest_steps_tree.py` 查询，使用 `build_shortest_steps.py` 预生成的持久化表；预生成表里的步数是保守估计，实际最小步数以顺序表展开结果为准。查询最少步数 HTML 时会保留旧树状图，并额外生成 `_tree_steps_order-时间戳.html` 合成顺序表；加 `--image` 时也会额外生成同名 `.png`。加 `--dynamic-refresh` 时会先输出旧结果，再刷新旧路线相关对象；如果没有配方变化，会跳过全量重算。
+最少步数树由 `shortest_steps_tree.py` 查询，使用 `build_shortest_steps.py` 预生成的持久化表；预生成表里的步数是保守估计，实际最小步数以顺序表展开结果为准。查询最少步数 HTML 时会保留旧树状图，并额外生成 `_tree_steps_order-时间戳.html` 合成顺序表；加 `--image` 时也会额外生成同名 `.png`。加 `--dynamic-refresh true` 时会先输出旧结果，再刷新旧路线相关对象；如果没有配方变化，会跳过全量重算。
 
-最少步数不可达统计由 `shortest_steps_unreachable.py` 生成，输出当前最少步数表里哪些对象不可达，并按底层阻塞点影响数量排序生成 HTML/TXT；`--dynamic-refresh` 会只检查不可达对象是否仍在物品栏，并刷新这些不可达对象的详情。
+最少步数不可达统计由 `shortest_steps_unreachable.py` 生成，输出当前最少步数表里哪些对象不可达，并按底层阻塞点影响数量排序生成 HTML/TXT；`--dynamic-refresh true` 会只检查不可达对象是否仍在物品栏，并刷新这些不可达对象的详情。
 
 常用参数：
 
@@ -100,6 +100,7 @@ python shortest_steps_unreachable.py
 - [build_shortest_steps.md](build_shortest_steps.md)：离线生成最少合成步数表。
 - [shortest_steps_tree.md](shortest_steps_tree.md)：查询持久化最少步数合成树。
 - [shortest_steps_unreachable.md](shortest_steps_unreachable.md)：统计最少步数表中不可达对象并渲染阻塞点影响图。
+- [shortest_steps_workflow.md](shortest_steps_workflow.md)：从全量同步、候选表构建、可达性检查到后续最短路径优化的推荐流程。
 - [shortest_steps_cycle_render.md](shortest_steps_cycle_render.md)：渲染没有叶子阻塞点时的非叶/可能成环不可达对象报告。
 - [shortest_steps_render.md](shortest_steps_render.md)：渲染持久化最少步数树的 text/html 输出。
 - [shortest_steps_order_render.md](shortest_steps_order_render.md)：渲染最少步数路线的合成顺序 HTML。
