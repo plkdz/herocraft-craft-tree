@@ -7,19 +7,18 @@ from __future__ import annotations
 # python shortest_steps_tree.py 末日鱼雷 装备 --show-id --image
 
 import argparse
+import contextlib
 import json
 import os
+import shutil
 import sys
 import time
 from typing import Any
 
 from build_shortest_steps import (
     SHORTEST_STEPS_FILE,
-    build_output_payload,
-    build_shortest_steps,
     load_detail_cache,
     resolve_base_ids,
-    write_json,
 )
 from herocraft_client import ClientConfig, HeroCraftClient
 from herocraft_core import (
@@ -42,6 +41,7 @@ from herocraft_core import (
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
 from shortest_steps_order_render import build_order_html_document, collect_order_steps, order_output_path_for, render_order_text
+from shortest_steps_rebuild import load_shortest_steps, load_shortest_steps_payload, rebuild_shortest_steps_cache, resolve_rebuild_candidate_limit
 from shortest_steps_render import build_html_document, child_route, output_path_for, recipe_ids, render_steps_tree_text
 
 
@@ -75,29 +75,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dynamic-min-expand-depth", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--base-ids", default="", help="动态重算额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default="水,火,土,风", help="动态重算基础元素名称，逗号分隔")
-    parser.add_argument("--candidate-limit", type=int, default=0, help="动态重算每个对象最多保留候选数；默认沿用当前最少步数表")
+    parser.add_argument("--candidate-limit", type=int, default=8, help="动态重算每个对象最多保留候选数")
     parser.add_argument("--max-iterations", type=int, default=999, help="动态重算最大迭代轮数")
     return parser.parse_args()
-
-
-def load_shortest_steps_payload(path: str) -> tuple[dict[int, dict[str, Any]], int]:
-    with open(path, "r", encoding="utf-8") as file:
-        payload = json.load(file)
-    steps = payload.get("steps") if isinstance(payload, dict) else None
-    if steps is None and isinstance(payload, dict):
-        steps = payload.get("routes")
-    if not isinstance(steps, dict):
-        raise RuntimeError(f"{path} 不是最少步数表。先运行 python build_shortest_steps.py")
-    result: dict[int, dict[str, Any]] = {}
-    for raw_id, raw_route in steps.items():
-        if isinstance(raw_id, str) and raw_id.isdigit() and isinstance(raw_route, dict):
-            result[int(raw_id)] = raw_route
-    candidate_limit = payload.get("candidate_limit") if isinstance(payload, dict) else None
-    return result, candidate_limit if isinstance(candidate_limit, int) and candidate_limit > 0 else 8
-
-
-def load_shortest_steps(path: str) -> dict[int, dict[str, Any]]:
-    return load_shortest_steps_payload(path)[0]
 
 
 def resolve_cached_object(query: str, item_type: str, details: dict[int, ApiObject], *, by_id: bool = False) -> ApiObject:
@@ -281,6 +261,63 @@ def route_object_id_order(
     result.extend(route_object_id_order(left_id, steps_table, left_route, next_path, emitted))
     result.extend(route_object_id_order(right_id, steps_table, right_route, next_path, emitted))
     return result
+
+
+def route_recipe_exists(detail: ApiObject, recipe: dict[str, Any]) -> bool:
+    operation = recipe.get("operation", "add")
+    left_id = recipe.get("ingredient_a_id")
+    right_id = recipe.get("ingredient_b_id")
+    if not isinstance(left_id, int) or not isinstance(right_id, int):
+        return False
+    for source in iter_sources(detail):
+        if source.get("operation", "add") != operation:
+            continue
+        if require_id(source["ingredient_a"]) == left_id and require_id(source["ingredient_b"]) == right_id:
+            return True
+    return False
+
+
+def route_still_valid(
+    object_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    route_override: dict[str, Any] | None = None,
+    path: frozenset[int] = frozenset(),
+) -> bool:
+    if object_id in path:
+        return True
+    route = route_override if route_override is not None else steps_table.get(object_id)
+    if route is None:
+        return False
+    recipe = route.get("recipe")
+    if recipe is None:
+        return True
+    if not isinstance(recipe, dict):
+        return False
+    detail = details.get(object_id)
+    if detail is None or not route_recipe_exists(detail, recipe):
+        return False
+    ids = recipe_ids(route)
+    if ids is None:
+        return False
+    left_id, right_id = ids
+    next_path = path | {object_id}
+    left_route = child_route(recipe, "ingredient_a_required_ids", "ingredient_a_steps", left_id, steps_table)
+    right_route = child_route(recipe, "ingredient_b_required_ids", "ingredient_b_steps", right_id, steps_table)
+    return route_still_valid(
+        left_id,
+        details=details,
+        steps_table=steps_table,
+        route_override=left_route,
+        path=next_path,
+    ) and route_still_valid(
+        right_id,
+        details=details,
+        steps_table=steps_table,
+        route_override=right_route,
+        path=next_path,
+    )
 
 
 def craft_sources_key(obj: ApiObject) -> str:
@@ -471,8 +508,6 @@ def main() -> None:
         fail("--dynamic-min-expand 不能大于 --dynamic-max-expand")
     if args.requests_per_minute <= 0:
         fail("--requests-per-minute 必须大于 0")
-    if args.candidate_limit < 0:
-        fail("--candidate-limit 不能小于 0")
     if args.max_iterations < 1:
         fail("--max-iterations 必须大于 0")
     try:
@@ -481,7 +516,7 @@ def main() -> None:
         details = load_detail_cache(str(args.cache_dir))
         steps_path = str(args.routes) if args.routes else os.path.join(str(args.cache_dir), SHORTEST_STEPS_FILE)
         steps_table, cached_candidate_limit = load_shortest_steps_payload(steps_path)
-        effective_candidate_limit = int(args.candidate_limit) if int(args.candidate_limit) > 0 else cached_candidate_limit
+        effective_candidate_limit = resolve_rebuild_candidate_limit(int(args.candidate_limit), cached_candidate_limit)
         try:
             target = resolve_cached_object(str(args.item), str(args.item_type), details, by_id=bool(args.id))
         except RuntimeError:
@@ -553,39 +588,54 @@ def main() -> None:
             verbose=bool(args.dynamic_verbose),
         )
         print(f"动态刷新完成：本次详情配方变更对象 {changed_count} 个", file=sys.stderr)
-        if changed_count == 0:
+        old_route_valid = step is not None and route_still_valid(
+            target_id,
+            details=refreshed_details,
+            steps_table=steps_table,
+        )
+        if step is not None:
+            print(f"旧最少步数路线：{'仍有效' if old_route_valid else '已失效'}", file=sys.stderr)
+        if changed_count == 0 and step is not None:
             print("动态刷新没有发现配方变化，跳过最少步数全量重算", file=sys.stderr)
             return
+        if changed_count == 0:
+            print("目标不在旧最少步数表里，即使详情无变化也需要重算", file=sys.stderr)
+        print("开始动态重算最少步数", file=sys.stderr)
         base_names = parse_name_set(str(args.base_names))
         base_ids = resolve_base_ids(refreshed_details, base_ids=parse_int_set(str(args.base_ids)), base_names=base_names)
-        print("开始动态重算最少步数", file=sys.stderr)
-        routes = build_shortest_steps(
+        previous_steps_path = f"{steps_path}.dynamic_previous"
+        with contextlib.suppress(OSError):
+            shutil.copy2(steps_path, previous_steps_path)
+        _, base_ids, base_names, _ = rebuild_shortest_steps_cache(
             refreshed_details,
+            steps_path,
             base_ids=base_ids,
             base_names=base_names,
             candidate_limit=effective_candidate_limit,
             max_iterations=int(args.max_iterations),
-            show_progress=True,
         )
-        payload = build_output_payload(
-            refreshed_details,
-            routes,
-            base_ids=base_ids,
-            base_names=base_names,
-            candidate_limit=effective_candidate_limit,
-        )
-        dynamic_steps = {
-            int(raw_id): raw_route
-            for raw_id, raw_route in payload["steps"].items()
-            if isinstance(raw_id, str) and raw_id.isdigit() and isinstance(raw_route, dict)
-        }
+        dynamic_steps = load_shortest_steps(steps_path)
         dynamic_step = dynamic_steps.get(target_id)
         if dynamic_step is None:
             print("动态重算后目标不可达，保留旧结果", file=sys.stderr)
+            if old_route_valid and os.path.exists(previous_steps_path):
+                shutil.copy2(previous_steps_path, steps_path)
+                print(f"旧路线仍有效，已恢复最少步数缓存：{steps_path}", file=sys.stderr)
             return
-        write_json(steps_path, payload)
+        old_steps = step.get("steps") if step is not None else None
+        new_steps = dynamic_step.get("steps")
+        if old_route_valid and isinstance(old_steps, int) and isinstance(new_steps, int) and new_steps > old_steps:
+            if os.path.exists(previous_steps_path):
+                shutil.copy2(previous_steps_path, steps_path)
+            print(
+                f"动态重算结果变差：{old_steps} -> {new_steps}，但旧路线仍有效，拒绝覆盖最少步数缓存",
+                file=sys.stderr,
+            )
+            return
+        with contextlib.suppress(OSError):
+            os.remove(previous_steps_path)
         print(f"已更新最少步数缓存：{steps_path}", file=sys.stderr)
-        old_step_value = step.get("steps") if step is not None else "不可达"
+        old_step_value = old_steps if old_steps is not None else "不可达"
         print(f"动态重算目标步数：{old_step_value} -> {dynamic_step.get('steps')}", file=sys.stderr)
         dynamic_output_path = output_path_with_label_before_timestamp(output_path, "_dynamic")
         print("输出动态刷新结果")

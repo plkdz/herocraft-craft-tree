@@ -37,8 +37,9 @@ python build_shortest_steps.py
 - `--image-output` 指定 PNG 输出路径，默认跟 HTML 同名。
 - `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸。
 - `--dynamic-refresh` 会先输出旧结果，再刷新旧路线相关对象详情；如果配方没有变化，会跳过最少步数全量重算。
-- `--candidate-limit` 只影响动态重算；默认 `0` 表示沿用当前最少步数表里的 `candidate_limit`，避免动态刷新把高候选表降级成默认小候选表。
+- `--candidate-limit` 只影响动态重算；默认 `8`。写回前会保留旧表中更短或新表缺失的路线，并递归补回这些旧路线依赖的子候选。
 - `--dynamic-min-expand` 控制即使配方未变化也继续扩散刷新几层，`--dynamic-max-expand` 控制变化链最多扩散几层。
+- 动态刷新会验证旧最少步数路线是否仍存在；如果旧路线仍有效，动态重算结果变差时会拒绝覆盖最少步数缓存。
 
 输出逻辑：
 
@@ -55,5 +56,7 @@ python build_shortest_steps.py
 关键函数：
 
 - `load_shortest_steps_payload()`：读取最少步数表，并同时返回表内记录的候选上限。
+- 动态全量重算、候选上限解析和旧路线写回保护复用 `shortest_steps_rebuild.py`。
+- `route_still_valid()`：递归验证旧路线里的每条配方在当前详情缓存中是否仍存在。
 - `dynamic_refresh_details()`：沿旧路线刷新目标相关对象详情，并统计配方变化数量。
 - `write_result()`：写出树状 HTML/text 和合成顺序表。
