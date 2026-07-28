@@ -22,6 +22,7 @@ from herocraft_core import (
     ApiObject,
     ProgressStats,
     fail,
+    format_object,
     load_session_from_file,
     require_id,
 )
@@ -35,8 +36,9 @@ class DetailFailure:
 
 
 def open_log_file() -> TextIO:
+    os.makedirs("logs", exist_ok=True)
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    return open(f"tmp_herocraft_sync_{timestamp}.log", "w", encoding="utf-8")
+    return open(os.path.join("logs", f"tmp_herocraft_sync_{timestamp}.log"), "w", encoding="utf-8")
 
 
 def log_line(log_file: TextIO, message: str) -> None:
@@ -98,6 +100,13 @@ def missing_detail_ids(client: HeroCraftClient, object_ids: list[int]) -> list[i
     return [object_id for object_id in object_ids if object_id not in cached_ids]
 
 
+def format_detail_label(object_id: int, object_lookup: dict[int, ApiObject]) -> str:
+    obj = object_lookup.get(object_id)
+    if obj is None:
+        return f"#{object_id}"
+    return f"#{object_id} {format_object(obj)}"
+
+
 def format_seconds(seconds: float) -> str:
     seconds = max(0, int(seconds))
     minutes, second = divmod(seconds, 60)
@@ -143,6 +152,7 @@ def refresh_details(
     log_file: TextIO,
     start_index: int,
     total_count: int,
+    object_lookup: dict[int, ApiObject],
 ) -> list[DetailFailure]:
     if client.max_workers <= 1 or len(object_ids) <= 1:
         failures: list[DetailFailure] = []
@@ -155,7 +165,7 @@ def refresh_details(
                 f"{global_index}/{total_count} | "
                 f"耗时 {format_seconds(time.time() - started_at)} | "
                 f"预计剩余 {format_seconds(remaining_seconds)} | "
-                f"#{object_id}",
+                f"{format_detail_label(object_id, object_lookup)}",
                 end="",
                 file=sys.stderr,
                 flush=True,
@@ -219,12 +229,14 @@ def main() -> None:
         if only_ids:
             inventory: list[ApiObject] = []
             object_ids = only_ids
+            object_lookup: dict[int, ApiObject] = {}
             log_line(log_file, f"only ids detail_count={len(object_ids)} ids={','.join(str(object_id) for object_id in object_ids)}")
         else:
             progress.phase = "同步物品栏"
             log_line(log_file, "inventory start")
             inventory = client.my_objects()
             log_line(log_file, f"inventory ok count={len(inventory)}")
+            object_lookup = {require_id(item): item for item in inventory}
             object_ids = unique_inventory_ids(inventory)
             if args.missing_only:
                 object_ids = missing_detail_ids(client, object_ids)
@@ -249,6 +261,7 @@ def main() -> None:
             log_file=log_file,
             start_index=int(args.start_index),
             total_count=total_detail_count,
+            object_lookup=object_lookup,
         )
         log_line(log_file, f"details done failures={len(failures)}")
         log_line(log_file, "save cache start")

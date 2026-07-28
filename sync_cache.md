@@ -19,6 +19,8 @@ python sync_cache.py --only-ids 1,2,3
 - 单个详情请求失败不会让整轮同步直接丢失已成功结果；失败 id 会在一轮结束后重试，默认最多 3 轮。
 - 无论正常结束还是异常退出，入口都会尽量保存已经拿到的缓存。
 - 入口会在支持 `reconfigure()` 的 Python 运行时显式切到 UTF-8 输出，避免 Windows 终端中文进度乱码。
+- 同步日志写入 `logs/tmp_herocraft_sync_时间戳.log`，日志目录默认不提交。
+- 物品栏同步进度会尽量显示 `#id 名称 · 类型`；只传 `--only-ids` 且没有物品栏上下文时退回只显示 `#id`。
 - 加 `--missing-only` 时，只补齐本机没有详情缓存的对象；已缓存对象不会刷新。
 - 加 `--start-index` 时，从去重后的详情请求列表指定位置继续同步，适合长同步中断后接着跑。
 - 加 `--only-ids` 时，只同步指定对象 id，不重新按物品栏生成详情请求列表。
@@ -43,4 +45,5 @@ python sync_cache.py --only-ids 1,2,3
 - `unique_inventory_ids()`：从物品栏分页结果里提取去重后的对象 id。
 - `parse_only_ids()`：解析 `--only-ids` 的对象 id 列表并去重。
 - `missing_detail_ids()`：计算本机还缺哪些详情缓存。
+- `format_detail_label()`：把详情同步进度里的对象 id 补成人能看的对象标签。
 - `refresh_details()`：按限速顺序同步详情，并输出全局进度位置。
