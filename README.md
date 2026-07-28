@@ -48,7 +48,7 @@ python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --
 python sync_cache.py
 python sync_cache.py --missing-only
 python shortest_steps_bottomup_build.py
-python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
+python shortest_steps_bottomup_build.py --candidate-limit 24 --max-iterations 99999
 python shortest_steps_tree.py 蒸汽 元素 --image
 python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
 python shortest_steps_recipe_stats.py

@@ -7,9 +7,9 @@
 ```powershell
 python shortest_steps_bottomup_build.py
 # 第一遍：生成启发表
-python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
+python shortest_steps_bottomup_build.py --candidate-limit 24 --max-iterations 99999
 # 第二遍：使用第一遍的 steps/required_ids 做预排序后重建
-python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
+python shortest_steps_bottomup_build.py --candidate-limit 24 --max-iterations 99999
 python shortest_steps_bottomup_build.py --self-test
 ```
 

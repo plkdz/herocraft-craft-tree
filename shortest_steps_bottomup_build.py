@@ -4,7 +4,7 @@ from __future__ import annotations
 #
 # 常用命令：
 # python shortest_steps_bottomup_build.py
-# python shortest_steps_bottomup_build.py --candidate-limit 8 --max-iterations 99999
+# python shortest_steps_bottomup_build.py --candidate-limit 24 --max-iterations 99999
 # python shortest_steps_bottomup_build.py --self-test
 
 import argparse
@@ -79,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="", help=f"输出文件，默认写入缓存目录下 {SHORTEST_STEPS_FILE}")
     parser.add_argument("--base-ids", default="", help="额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default=",".join(sorted(DEFAULT_BASE_NAMES)), help="基础元素名称，逗号分隔")
-    parser.add_argument("--candidate-limit", type=int, default=8, help="每个对象最多保留的非支配候选路线数")
+    parser.add_argument("--candidate-limit", type=int, default=24, help="每个对象最多保留的非支配候选路线数")
     parser.add_argument("--search-candidate-limit", type=int, default=0, help="内部搜索候选上限；0 表示等于 candidate-limit")
     parser.add_argument("--max-iterations", type=int, default=99999, help="最大固定点迭代轮数")
     parser.add_argument("--self-test", action="store_true", help="运行内置自检，不读取缓存")

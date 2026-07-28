@@ -22,7 +22,7 @@ def parse_steps_payload(payload: Any, path: str) -> tuple[dict[int, dict[str, An
         if isinstance(raw_id, str) and raw_id.isdigit() and isinstance(raw_route, dict):
             steps[int(raw_id)] = raw_route
     candidate_limit = payload.get("candidate_limit") if isinstance(payload, dict) else None
-    return steps, candidate_limit if isinstance(candidate_limit, int) and candidate_limit > 0 else 8
+    return steps, candidate_limit if isinstance(candidate_limit, int) and candidate_limit > 0 else 24
 
 
 def load_shortest_steps_payload(path: str) -> tuple[dict[int, dict[str, Any]], int]:
