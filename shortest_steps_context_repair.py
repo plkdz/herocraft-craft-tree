@@ -26,10 +26,21 @@ class RepairResult:
 class RepairProgress:
     started_at: float
     show_progress: bool
+    estimated_state_count: int | None = None
     call_count: int = 0
     recipe_count: int = 0
     combination_count: int = 0
     last_report_at: float = 0.0
+
+    def eta_text(self, *, completed_count: int, now: float) -> str:
+        if self.estimated_state_count is None or completed_count <= 0:
+            return ""
+        elapsed = now - self.started_at
+        if elapsed <= 0:
+            return ""
+        remaining_count = max(0, self.estimated_state_count - completed_count)
+        eta_seconds = remaining_count * elapsed / completed_count
+        return f" | 粗估剩余 {format_seconds(eta_seconds)}"
 
     def report(self, *, visited_count: int, memo_count: int, force: bool = False) -> None:
         if not self.show_progress:
@@ -38,14 +49,25 @@ class RepairProgress:
         if not force and now - self.last_report_at < 1.0:
             return
         self.last_report_at = now
+        eta_text = self.eta_text(completed_count=memo_count, now=now)
         print(
             f"\r上下文局部修复 | 耗时 {now - self.started_at:6.1f}s | "
+            f"状态 {memo_count}/{self.estimated_state_count or '?'}{eta_text} | "
             f"访问节点 {visited_count} | 缓存状态 {memo_count} | "
             f"递归 {self.call_count} | 配方 {self.recipe_count} | 组合 {self.combination_count}",
             end="",
             file=sys.stderr,
             flush=True,
         )
+
+
+def format_seconds(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    minutes, second = divmod(seconds, 60)
+    hours, minute = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minute:02d}:{second:02d}"
+    return f"{minute:d}:{second:02d}"
 
 
 def route_required_set(route: dict[str, Any]) -> frozenset[int]:
@@ -240,6 +262,53 @@ def route_candidates(
     return memo[memo_key]
 
 
+def estimate_repair_state_count(
+    target_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    base_ids: set[int],
+    base_names: set[str],
+    depth: int,
+    max_extra_steps: int,
+) -> int:
+    seen: set[tuple[int, int]] = set()
+    deepest_seen_by_id: dict[int, int] = {}
+
+    def walk(object_id: int, remaining_depth: int, path: frozenset[int]) -> None:
+        obj = details.get(object_id)
+        if obj is None or is_base_object(obj, base_ids=base_ids, base_names=base_names):
+            return
+        if remaining_depth <= 0 or object_id in path:
+            return
+        deepest_seen = deepest_seen_by_id.get(object_id)
+        if deepest_seen is not None and deepest_seen >= remaining_depth:
+            return
+        state_key = object_id, remaining_depth
+        if state_key in seen:
+            return
+        seen.add(state_key)
+        deepest_seen_by_id[object_id] = remaining_depth
+
+        old_route = steps_table.get(object_id)
+        old_steps = old_route.get("steps") if isinstance(old_route, dict) and isinstance(old_route.get("steps"), int) else None
+        step_bound = old_steps + max_extra_steps if old_steps is not None else None
+        next_path = path | {object_id}
+        for source in iter_sources(obj):
+            left_id = require_id(source["ingredient_a"])
+            right_id = require_id(source["ingredient_b"])
+            if step_bound is not None:
+                left_old_steps = old_step_bound(left_id, details=details, steps_table=steps_table, base_ids=base_ids, base_names=base_names)
+                right_old_steps = old_step_bound(right_id, details=details, steps_table=steps_table, base_ids=base_ids, base_names=base_names)
+                if left_old_steps is None or right_old_steps is None or 1 + left_old_steps + right_old_steps > step_bound:
+                    continue
+            walk(left_id, remaining_depth - 1, next_path)
+            walk(right_id, remaining_depth - 1, next_path)
+
+    walk(target_id, depth, frozenset())
+    return len(seen)
+
+
 def merge_repaired_routes(
     steps_table: dict[int, dict[str, Any]],
     memo: dict[tuple[int, int], list[dict[str, Any]]],
@@ -282,7 +351,16 @@ def repair_target_routes(
     memo: dict[tuple[int, int], list[dict[str, Any]]] = {}
     deepest_memo_by_id: dict[int, tuple[int, list[dict[str, Any]]]] = {}
     visited: set[int] = set()
-    progress = RepairProgress(started_at=time.time(), show_progress=show_progress)
+    estimated_state_count = estimate_repair_state_count(
+        target_id,
+        details=details,
+        steps_table=steps_table,
+        base_ids=base_ids,
+        base_names=base_names,
+        depth=depth,
+        max_extra_steps=max_extra_steps,
+    )
+    progress = RepairProgress(started_at=time.time(), show_progress=show_progress, estimated_state_count=estimated_state_count)
     target_routes = route_candidates(
         target_id,
         details=details,

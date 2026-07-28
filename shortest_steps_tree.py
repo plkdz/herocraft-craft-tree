@@ -427,8 +427,8 @@ def dynamic_refresh_details(
             discovered_total = len(queued_ids)
             estimated_total = min(max_refresh, len(checked_ids) + len(queue) + 1)
             remaining = max(0, estimated_total - current)
-            eta_seconds = remaining * detail_delay
             elapsed = time.time() - started_at
+            eta_seconds = remaining * elapsed / current if current > 0 else 0.0
             before = client.detail_cache_snapshot().get(object_id)
             before_key = craft_sources_key(before) if before is not None else ""
             print(
