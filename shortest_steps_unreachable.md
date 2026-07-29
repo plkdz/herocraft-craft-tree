@@ -33,7 +33,7 @@ python shortest_steps_unreachable.py --dynamic-refresh true --requests-per-minut
 - 仍在物品栏的不可达对象会刷新详情；如果发现配方变化，会更新详情缓存并重算最少步数表。
 - 不可达详情刷新默认按 `--requests-per-minute 50` 限速，进度会显示耗时、预计剩余和配方变更数。
 - 单个不可达详情请求失败时默认重试 5 次，每次重试前按当前详情请求间隔等待；`HTTP 403` 或重试耗尽会跳过该对象，不中断整批统计。
-- 动态重算使用 `--candidate-limit` 和 `--max-iterations`；`--candidate-limit` 默认 `8`。写回前会按对象做单调合并：旧表已有且不更差的路线直接保留，只接收新增或严格更短的新路线，并递归补回旧路线依赖的子候选。
+- 动态重算使用 `--candidate-limit` 和 `--max-iterations`；`--candidate-limit` 默认 `0` 表示沿用当前最少步数表记录的候选上限，传正数时必须和当前表记录值一致。
 - 动态重算写出大 JSON 时会显示写入进度。
 
 参数要点：

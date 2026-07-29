@@ -47,9 +47,12 @@ def load_shortest_steps_summary(path: str) -> tuple[set[int], set[int], set[str]
 
 
 def resolve_rebuild_candidate_limit(requested_limit: int, cached_limit: int) -> int:
-    _ = cached_limit
+    if requested_limit == 0:
+        return cached_limit
     if requested_limit < 1:
-        raise RuntimeError("--candidate-limit 必须大于 0")
+        raise RuntimeError("--candidate-limit 不能小于 0")
+    if requested_limit != cached_limit:
+        raise RuntimeError(f"--candidate-limit 必须和当前最少步数表一致：传入 {requested_limit}，当前表为 {cached_limit}")
     return requested_limit
 
 
@@ -101,13 +104,20 @@ def rebuild_shortest_steps_cache(
 
 
 def _self_test() -> None:
-    assert resolve_rebuild_candidate_limit(8, 24) == 8
+    assert resolve_rebuild_candidate_limit(24, 24) == 24
+    assert resolve_rebuild_candidate_limit(0, 24) == 24
     try:
-        resolve_rebuild_candidate_limit(0, 24)
+        resolve_rebuild_candidate_limit(8, 24)
     except RuntimeError:
         pass
     else:
-        raise AssertionError("--candidate-limit 0 应该被拒绝")
+        raise AssertionError("--candidate-limit 和当前表不一致时应该被拒绝")
+    try:
+        resolve_rebuild_candidate_limit(-1, 24)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("--candidate-limit 负数应该被拒绝")
 
     assert candidate_key({"steps": 2, "required_ids": [3, 1, 3]}) == (2, (1, 3, 3))
 
