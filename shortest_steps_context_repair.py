@@ -9,6 +9,8 @@ from typing import Any
 
 from herocraft_core import ApiObject, CraftSource, is_base_object, iter_sources, require_id
 
+DEFAULT_CONTEXT_SEARCH_LIMIT_CAP = 32
+
 
 @dataclass(frozen=True)
 class RepairResult:
@@ -70,6 +72,10 @@ def format_seconds(seconds: float) -> str:
     return f"{minute:d}:{second:02d}"
 
 
+def resolve_context_search_limit(limit: int) -> int:
+    return max(limit, min(DEFAULT_CONTEXT_SEARCH_LIMIT_CAP, limit + 8))
+
+
 def route_required_set(route: dict[str, Any]) -> frozenset[int]:
     required_ids = route.get("required_ids")
     if not isinstance(required_ids, list):
@@ -82,19 +88,30 @@ def route_sort_key(route: dict[str, Any]) -> tuple[int, tuple[int, ...]]:
     return steps if isinstance(steps, int) else 999_999, tuple(sorted(route_required_set(route)))
 
 
-def dedupe_routes(routes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def route_context_sort_key(route: dict[str, Any], focus_weights: dict[int, int]) -> tuple[int, int, int, tuple[int, ...]]:
+    required_ids = route_required_set(route)
+    steps = route.get("steps")
+    step_count = steps if isinstance(steps, int) else 999_999
+    inside_weight = sum(focus_weights.get(object_id, 0) for object_id in required_ids)
+    outside_count = sum(1 for object_id in required_ids if object_id not in focus_weights)
+    return outside_count, step_count, -inside_weight, tuple(sorted(required_ids))
+
+
+def dedupe_routes(routes: list[dict[str, Any]], *, focus_weights: dict[int, int] | None = None) -> list[dict[str, Any]]:
     best_by_required: dict[frozenset[int], dict[str, Any]] = {}
     for route in routes:
         required_ids = route_required_set(route)
         existing = best_by_required.get(required_ids)
         if existing is None or route_sort_key(route) < route_sort_key(existing):
             best_by_required[required_ids] = route
+    if focus_weights:
+        return sorted(best_by_required.values(), key=lambda route: route_context_sort_key(route, focus_weights))
     return sorted(best_by_required.values(), key=route_sort_key)
 
 
-def prune_routes(routes: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+def prune_routes(routes: list[dict[str, Any]], *, limit: int, focus_weights: dict[int, int] | None = None) -> list[dict[str, Any]]:
     kept: list[dict[str, Any]] = []
-    for route in dedupe_routes(routes):
+    for route in dedupe_routes(routes, focus_weights=focus_weights):
         required_ids = route_required_set(route)
         steps = route.get("steps")
         if not isinstance(steps, int):
@@ -151,6 +168,50 @@ def make_route(
     }
 
 
+def collect_focus_weights(
+    target_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    base_ids: set[int],
+    base_names: set[str],
+    depth: int,
+) -> dict[int, int]:
+    focus_weights: dict[int, int] = {}
+
+    def add_weight(object_id: int, weight: int) -> None:
+        focus_weights[object_id] = focus_weights.get(object_id, 0) + max(1, weight)
+
+    old_route = steps_table.get(target_id)
+    if isinstance(old_route, dict):
+        for object_id in route_required_set(old_route):
+            add_weight(object_id, depth + 1)
+
+    seen: set[tuple[int, int]] = set()
+
+    def walk(object_id: int, remaining_depth: int) -> None:
+        state = object_id, remaining_depth
+        if state in seen:
+            return
+        seen.add(state)
+        obj = details.get(object_id)
+        if obj is None or is_base_object(obj, base_ids=base_ids, base_names=base_names):
+            return
+        add_weight(object_id, remaining_depth + 1)
+        if remaining_depth <= 0:
+            return
+        for source in iter_sources(obj):
+            left_id = require_id(source["ingredient_a"])
+            right_id = require_id(source["ingredient_b"])
+            add_weight(left_id, remaining_depth)
+            add_weight(right_id, remaining_depth)
+            walk(left_id, remaining_depth - 1)
+            walk(right_id, remaining_depth - 1)
+
+    walk(target_id, depth)
+    return focus_weights
+
+
 def old_step_bound(
     object_id: int,
     *,
@@ -179,6 +240,7 @@ def route_candidates(
     limit: int,
     depth: int,
     max_extra_steps: int,
+    focus_weights: dict[int, int],
     path: frozenset[int],
     memo: dict[tuple[int, int], list[dict[str, Any]]],
     deepest_memo_by_id: dict[int, tuple[int, list[dict[str, Any]]]],
@@ -189,11 +251,11 @@ def route_candidates(
     progress.report(visited_count=len(visited), memo_count=len(memo))
     obj = details.get(object_id)
     if obj is None:
-        return seed_routes(object_id, steps_table)[:limit]
+        return prune_routes(seed_routes(object_id, steps_table), limit=limit, focus_weights=focus_weights)
     if is_base_object(obj, base_ids=base_ids, base_names=base_names):
         return [{"steps": 0, "required_ids": [], "recipe": None}]
     if depth <= 0 or object_id in path:
-        return seed_routes(object_id, steps_table)[:limit]
+        return prune_routes(seed_routes(object_id, steps_table), limit=limit, focus_weights=focus_weights)
     deepest_cached = deepest_memo_by_id.get(object_id)
     if deepest_cached is not None and deepest_cached[0] >= depth:
         return deepest_cached[1]
@@ -208,7 +270,7 @@ def route_candidates(
     step_bound = old_steps + max_extra_steps if old_steps is not None else None
     routes = [
         route
-        for route in prune_routes(seed_routes(object_id, steps_table), limit=limit)
+        for route in prune_routes(seed_routes(object_id, steps_table), limit=limit, focus_weights=focus_weights)
         if step_bound is None or route_sort_key(route)[0] <= step_bound
     ]
     next_path = path | {object_id}
@@ -230,6 +292,7 @@ def route_candidates(
             limit=limit,
             depth=depth - 1,
             max_extra_steps=max_extra_steps,
+            focus_weights=focus_weights,
             path=next_path,
             memo=memo,
             deepest_memo_by_id=deepest_memo_by_id,
@@ -245,6 +308,7 @@ def route_candidates(
             limit=limit,
             depth=depth - 1,
             max_extra_steps=max_extra_steps,
+            focus_weights=focus_weights,
             path=next_path,
             memo=memo,
             deepest_memo_by_id=deepest_memo_by_id,
@@ -257,7 +321,7 @@ def route_candidates(
                 route = make_route(object_id, source, left_route, right_route)
                 if step_bound is None or route_sort_key(route)[0] <= step_bound:
                     routes.append(route)
-        routes = prune_routes(routes, limit=limit)
+        routes = prune_routes(routes, limit=limit, focus_weights=focus_weights)
         progress.report(visited_count=len(visited), memo_count=len(memo))
 
     memo[memo_key] = routes
@@ -319,6 +383,7 @@ def merge_repaired_routes(
     memo: dict[tuple[int, int], list[dict[str, Any]]],
     *,
     limit: int,
+    focus_weights: dict[int, int] | None = None,
     target_id: int,
     target_routes: list[dict[str, Any]],
 ) -> dict[int, dict[str, Any]]:
@@ -367,14 +432,14 @@ def merge_repaired_routes(
         force_route(target_id, route)
 
     def merge_routes_preserving_forced(routes: list[dict[str, Any]], forced_routes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        merged = prune_routes(routes + forced_routes, limit=limit)
+        merged = prune_routes(routes + forced_routes, limit=limit, focus_weights=focus_weights)
         existing_keys = {route_identity(route) for route in merged}
         for forced_route in forced_routes:
             key = route_identity(forced_route)
             if key not in existing_keys:
                 merged.append(forced_route)
                 existing_keys.add(key)
-        return sorted(dedupe_routes(merged), key=route_sort_key)
+        return dedupe_routes(merged, focus_weights=focus_weights)
 
     for object_id in sorted(set(routes_by_id) | set(forced_by_id)):
         routes = routes_by_id.get(object_id, [])
@@ -406,6 +471,7 @@ def repair_target_routes(
 ) -> RepairResult:
     old_route = steps_table.get(target_id)
     old_steps = old_route.get("steps") if isinstance(old_route, dict) and isinstance(old_route.get("steps"), int) else None
+    search_limit = resolve_context_search_limit(limit)
     memo: dict[tuple[int, int], list[dict[str, Any]]] = {}
     deepest_memo_by_id: dict[int, tuple[int, list[dict[str, Any]]]] = {}
     visited: set[int] = set()
@@ -419,15 +485,24 @@ def repair_target_routes(
         max_extra_steps=max_extra_steps,
     )
     progress = RepairProgress(started_at=time.time(), show_progress=show_progress, estimated_state_count=estimated_state_count)
+    focus_weights = collect_focus_weights(
+        target_id,
+        details=details,
+        steps_table=steps_table,
+        base_ids=base_ids,
+        base_names=base_names,
+        depth=depth,
+    )
     target_routes = route_candidates(
         target_id,
         details=details,
         steps_table=steps_table,
         base_ids=base_ids,
         base_names=base_names,
-        limit=limit,
+        limit=search_limit,
         depth=depth,
         max_extra_steps=max_extra_steps,
+        focus_weights=focus_weights,
         path=frozenset(),
         memo=memo,
         deepest_memo_by_id=deepest_memo_by_id,
@@ -437,7 +512,7 @@ def repair_target_routes(
     progress.report(visited_count=len(visited), memo_count=len(memo), force=True)
     if show_progress:
         print(file=sys.stderr, flush=True)
-    repaired = merge_repaired_routes(steps_table, memo, limit=limit, target_id=target_id, target_routes=target_routes)
+    repaired = merge_repaired_routes(steps_table, memo, limit=search_limit, focus_weights=focus_weights, target_id=target_id, target_routes=target_routes)
     if target_routes:
         best = target_routes[0]
         record = dict(repaired.get(target_id, {}))
@@ -486,6 +561,14 @@ def _self_test() -> None:
     }
     repaired = merge_repaired_routes(steps_table, {(20, 1): [forced_child]}, limit=1, target_id=10, target_routes=[target_route])
     assert forced_child in repaired[20]["candidates"]
+    shared_route = {"steps": 3, "required_ids": [100, 101, 102], "recipe": None}
+    locally_short_route = {"steps": 3, "required_ids": [200, 201, 202], "recipe": None}
+    weighted = prune_routes(
+        [locally_short_route, shared_route],
+        limit=1,
+        focus_weights={100: 10, 101: 10, 102: 10, 103: 10},
+    )
+    assert weighted == [shared_route]
 
 
 if __name__ == "__main__":

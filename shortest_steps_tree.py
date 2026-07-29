@@ -41,10 +41,10 @@ from herocraft_core import (
     require_id,
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
-from shortest_steps_context_repair import repair_target_routes
+from shortest_steps_context_repair import repair_target_routes, resolve_context_search_limit
 from shortest_steps_order_render import build_order_html_document, collect_order_steps, order_output_path_for, render_order_text
 from shortest_steps_rebuild import load_shortest_steps, load_shortest_steps_payload, rebuild_shortest_steps_cache, resolve_rebuild_candidate_limit
-from shortest_steps_render import build_html_document, child_route, output_path_for, recipe_ids, render_steps_tree_text
+from shortest_steps_render import build_html_document, child_route, is_missing_child_route, output_path_for, recipe_ids, render_steps_tree_text, resolved_route_required_ids
 
 
 def parse_args() -> argparse.Namespace:
@@ -225,6 +225,8 @@ def route_object_ids(object_id: int, steps_table: dict[int, dict[str, Any]], rou
     route = route_override if route_override is not None else steps_table.get(object_id)
     if route is None:
         return {object_id}
+    if is_missing_child_route(route):
+        return {object_id}
     result = {object_id}
     ids = recipe_ids(route)
     recipe = route.get("recipe")
@@ -256,6 +258,8 @@ def route_object_id_order(
     route = route_override if route_override is not None else steps_table.get(object_id)
     result = [object_id]
     if route is None:
+        return result
+    if is_missing_child_route(route):
         return result
     ids = recipe_ids(route)
     recipe = route.get("recipe")
@@ -296,6 +300,8 @@ def route_still_valid(
         return True
     route = route_override if route_override is not None else steps_table.get(object_id)
     if route is None:
+        return False
+    if is_missing_child_route(route):
         return False
     recipe = route.get("recipe")
     if recipe is None:
@@ -355,16 +361,20 @@ def select_shortest_actual_route(
         return steps_table
 
     def actual_key(candidate: dict[str, Any]) -> tuple[int, int, tuple[int, ...]]:
-        actual_steps = len(collect_order_steps(target_id, details=details, steps_table=steps_table, show_id=show_id, route_override=candidate))
+        actual_required_ids = resolved_route_required_ids(target_id, steps_table, candidate)
+        if actual_required_ids is None:
+            return (999_999, 999_999, ())
         estimated_steps = candidate.get("steps")
         required_ids = candidate.get("required_ids")
         return (
-            actual_steps,
+            len(actual_required_ids),
             estimated_steps if isinstance(estimated_steps, int) else 999_999,
             tuple(value for value in required_ids if isinstance(value, int)) if isinstance(required_ids, list) else (),
         )
 
     best = min(valid_candidates, key=actual_key)
+    if actual_key(best)[0] >= 999_999:
+        return steps_table
     if actual_key(best) == actual_key(route):
         return steps_table
     updated_route = dict(route)
@@ -394,7 +404,8 @@ def write_result(
     step = steps_table.get(target_id)
     if step is None:
         fail(f"{format_object(target, show_id=show_id)} 不在最少步数表里")
-    actual_step_count = len(collect_order_steps(target_id, details=details, steps_table=steps_table, show_id=show_id))
+    resolved_required_ids = resolved_route_required_ids(target_id, steps_table, step)
+    actual_step_count = len(resolved_required_ids) if resolved_required_ids is not None else int(step.get("steps", 0))
     if output_format == "text":
         content = (
             f"目标：{format_object(target, show_id=show_id)}\n"
@@ -585,8 +596,10 @@ def main() -> None:
                 fail(f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。先同步缓存并运行 python shortest_steps_bottomup_build.py")
             print(f"{format_object(target, show_id=args.show_id)} 不在旧最少步数表里，跳过离线旧结果", file=sys.stderr)
         if bool(args.context_repair) and step is not None:
+            context_search_limit = resolve_context_search_limit(int(args.context_limit))
+            search_note = f"，内部搜索上限 {context_search_limit}" if context_search_limit != int(args.context_limit) else ""
             print(
-                f"开始上下文局部修复：候选上限 {args.context_limit}，深度 {args.context_depth}，中间额外步数 {args.context_extra_steps}；不写回缓存",
+                f"开始上下文局部修复：候选上限 {args.context_limit}{search_note}，深度 {args.context_depth}，中间额外步数 {args.context_extra_steps}；不写回缓存",
                 file=sys.stderr,
                 flush=True,
             )
