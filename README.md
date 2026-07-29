@@ -103,6 +103,7 @@ python shortest_steps_unreachable.py
 - [build_shortest_steps.md](build_shortest_steps.md)：旧构建命令的兼容入口。
 - [shortest_steps_tree.md](shortest_steps_tree.md)：查询持久化最少步数合成树。
 - [shortest_steps_recipe_stats.md](shortest_steps_recipe_stats.md)：统计高扇入但有效候选少的对象，识别搜索膨胀点。
+- [shortest_steps_route_funnel_diagnose.md](shortest_steps_route_funnel_diagnose.md)：验证人工链条是否被四基谱表完整保留，并定位候选剪枝漏斗。
 - [shortest_steps_unreachable.md](shortest_steps_unreachable.md)：统计最少步数表中不可达对象并渲染阻塞点影响图。
 - [shortest_steps_workflow.md](shortest_steps_workflow.md)：从全量同步、候选表构建、可达性检查到后续最短路径优化的推荐流程。
 - [shortest_steps_cycle_render.md](shortest_steps_cycle_render.md)：渲染没有叶子阻塞点时的非叶/可能成环不可达对象报告。
