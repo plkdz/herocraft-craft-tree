@@ -76,6 +76,10 @@ def resolve_context_search_limit(limit: int) -> int:
     return max(limit, min(DEFAULT_CONTEXT_SEARCH_LIMIT_CAP, limit + 8))
 
 
+def resolve_context_wide_search_limit(limit: int) -> int:
+    return max(resolve_context_search_limit(limit), min(64, limit + 24))
+
+
 def route_required_set(route: dict[str, Any]) -> frozenset[int]:
     required_ids = route.get("required_ids")
     if not isinstance(required_ids, list):
@@ -378,6 +382,183 @@ def estimate_repair_state_count(
     return len(seen)
 
 
+def collect_target_neighborhood(
+    target_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    base_ids: set[int],
+    base_names: set[str],
+    depth: int,
+    max_extra_steps: int,
+) -> set[int]:
+    object_ids: set[int] = set()
+    deepest_seen_by_id: dict[int, int] = {}
+
+    def walk(object_id: int, remaining_depth: int, path: frozenset[int]) -> None:
+        obj = details.get(object_id)
+        if obj is None or is_base_object(obj, base_ids=base_ids, base_names=base_names):
+            return
+        if object_id in path:
+            return
+        deepest_seen = deepest_seen_by_id.get(object_id)
+        if deepest_seen is not None and deepest_seen >= remaining_depth:
+            return
+        deepest_seen_by_id[object_id] = remaining_depth
+        object_ids.add(object_id)
+        if remaining_depth <= 0:
+            return
+        old_route = steps_table.get(object_id)
+        old_steps = old_route.get("steps") if isinstance(old_route, dict) and isinstance(old_route.get("steps"), int) else None
+        step_bound = old_steps + max_extra_steps if old_steps is not None else None
+        next_path = path | {object_id}
+        for source in iter_sources(obj):
+            left_id = require_id(source["ingredient_a"])
+            right_id = require_id(source["ingredient_b"])
+            if step_bound is not None:
+                left_old_steps = old_step_bound(left_id, details=details, steps_table=steps_table, base_ids=base_ids, base_names=base_names)
+                right_old_steps = old_step_bound(right_id, details=details, steps_table=steps_table, base_ids=base_ids, base_names=base_names)
+                if left_old_steps is None or right_old_steps is None or 1 + left_old_steps + right_old_steps > step_bound:
+                    continue
+            walk(left_id, remaining_depth - 1, next_path)
+            walk(right_id, remaining_depth - 1, next_path)
+
+    walk(target_id, depth, frozenset())
+    return object_ids
+
+
+def route_list_identity(routes: list[dict[str, Any]]) -> tuple[tuple[int | None, tuple[int, ...]], ...]:
+    return tuple(route_identity(route) for route in routes)
+
+
+def local_seed_routes(
+    object_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    base_ids: set[int],
+    base_names: set[str],
+    limit: int,
+    focus_weights: dict[int, int],
+) -> list[dict[str, Any]]:
+    obj = details.get(object_id)
+    if obj is not None and is_base_object(obj, base_ids=base_ids, base_names=base_names):
+        return [{"steps": 0, "required_ids": [], "recipe": None}]
+    return prune_routes(seed_routes(object_id, steps_table), limit=limit, focus_weights=focus_weights)
+
+
+def target_neighborhood_routes(
+    target_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    base_ids: set[int],
+    base_names: set[str],
+    limit: int,
+    wide_limit: int,
+    depth: int,
+    max_extra_steps: int,
+    focus_weights: dict[int, int],
+    progress: RepairProgress,
+) -> tuple[list[dict[str, Any]], dict[tuple[int, int], list[dict[str, Any]]], set[int]]:
+    neighborhood = collect_target_neighborhood(
+        target_id,
+        details=details,
+        steps_table=steps_table,
+        base_ids=base_ids,
+        base_names=base_names,
+        depth=depth,
+        max_extra_steps=max_extra_steps,
+    )
+    old_target_route = steps_table.get(target_id)
+    wide_object_ids = {target_id}
+    if isinstance(old_target_route, dict):
+        wide_object_ids.update(route_required_set(old_target_route))
+
+    def object_limit(object_id: int) -> int:
+        return wide_limit if object_id in wide_object_ids else limit
+
+    active_ids = (wide_object_ids & neighborhood) or {target_id}
+    routes_by_id = {
+        object_id: local_seed_routes(
+            object_id,
+            details=details,
+            steps_table=steps_table,
+            base_ids=base_ids,
+            base_names=base_names,
+            limit=object_limit(object_id),
+            focus_weights=focus_weights,
+        )
+        for object_id in active_ids
+    }
+    ordered_ids = sorted(
+        active_ids,
+        key=lambda object_id: old_step_bound(
+            object_id,
+            details=details,
+            steps_table=steps_table,
+            base_ids=base_ids,
+            base_names=base_names,
+        )
+        or 999_999,
+    )
+
+    def options_for(object_id: int) -> list[dict[str, Any]]:
+        obj = details.get(object_id)
+        if obj is not None and is_base_object(obj, base_ids=base_ids, base_names=base_names):
+            return [{"steps": 0, "required_ids": [], "recipe": None}]
+        return routes_by_id.get(object_id) or local_seed_routes(
+            object_id,
+            details=details,
+            steps_table=steps_table,
+            base_ids=base_ids,
+            base_names=base_names,
+            limit=object_limit(object_id),
+            focus_weights=focus_weights,
+        )
+
+    max_rounds = max(1, depth)
+    progress.estimated_state_count = len(active_ids) * max_rounds
+    for round_index in range(max_rounds):
+        changed = False
+        progress.call_count += 1
+        for object_index, object_id in enumerate(ordered_ids, start=1):
+            obj = details.get(object_id)
+            if obj is None or is_base_object(obj, base_ids=base_ids, base_names=base_names):
+                continue
+            old_route = steps_table.get(object_id)
+            old_steps = old_route.get("steps") if isinstance(old_route, dict) and isinstance(old_route.get("steps"), int) else None
+            step_bound = old_steps + max_extra_steps if old_steps is not None else None
+            routes = list(routes_by_id.get(object_id, []))
+            for source in iter_sources(obj):
+                progress.recipe_count += 1
+                left_id = require_id(source["ingredient_a"])
+                right_id = require_id(source["ingredient_b"])
+                left_routes = options_for(left_id)
+                right_routes = options_for(right_id)
+                if not left_routes or not right_routes:
+                    continue
+                progress.combination_count += len(left_routes) * len(right_routes)
+                for left_route in left_routes:
+                    if object_id in route_required_set(left_route):
+                        continue
+                    for right_route in right_routes:
+                        if object_id in route_required_set(right_route):
+                            continue
+                        route = make_route(object_id, source, left_route, right_route)
+                        if step_bound is None or route_sort_key(route)[0] <= step_bound:
+                            routes.append(route)
+                routes = prune_routes(routes, limit=object_limit(object_id), focus_weights=focus_weights)
+            if route_list_identity(routes) != route_list_identity(routes_by_id.get(object_id, [])):
+                routes_by_id[object_id] = routes
+                changed = True
+            progress.report(visited_count=len(active_ids), memo_count=round_index * len(active_ids) + object_index)
+        if not changed:
+            break
+    memo = {(object_id, depth): routes for object_id, routes in routes_by_id.items()}
+    return routes_by_id.get(target_id, []), memo, active_ids
+
+
 def merge_repaired_routes(
     steps_table: dict[int, dict[str, Any]],
     memo: dict[tuple[int, int], list[dict[str, Any]]],
@@ -472,9 +653,7 @@ def repair_target_routes(
     old_route = steps_table.get(target_id)
     old_steps = old_route.get("steps") if isinstance(old_route, dict) and isinstance(old_route.get("steps"), int) else None
     search_limit = resolve_context_search_limit(limit)
-    memo: dict[tuple[int, int], list[dict[str, Any]]] = {}
-    deepest_memo_by_id: dict[int, tuple[int, list[dict[str, Any]]]] = {}
-    visited: set[int] = set()
+    wide_search_limit = resolve_context_wide_search_limit(limit)
     estimated_state_count = estimate_repair_state_count(
         target_id,
         details=details,
@@ -493,23 +672,20 @@ def repair_target_routes(
         base_names=base_names,
         depth=depth,
     )
-    target_routes = route_candidates(
+    target_routes, memo, visited = target_neighborhood_routes(
         target_id,
         details=details,
         steps_table=steps_table,
         base_ids=base_ids,
         base_names=base_names,
         limit=search_limit,
+        wide_limit=wide_search_limit,
         depth=depth,
         max_extra_steps=max_extra_steps,
         focus_weights=focus_weights,
-        path=frozenset(),
-        memo=memo,
-        deepest_memo_by_id=deepest_memo_by_id,
-        visited=visited,
         progress=progress,
     )
-    progress.report(visited_count=len(visited), memo_count=len(memo), force=True)
+    progress.report(visited_count=len(visited), memo_count=progress.estimated_state_count or len(memo), force=True)
     if show_progress:
         print(file=sys.stderr, flush=True)
     repaired = merge_repaired_routes(steps_table, memo, limit=search_limit, focus_weights=focus_weights, target_id=target_id, target_routes=target_routes)

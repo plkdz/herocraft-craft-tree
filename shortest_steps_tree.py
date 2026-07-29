@@ -41,7 +41,7 @@ from herocraft_core import (
     require_id,
 )
 from herocraft_image import image_output_path, render_html_image, write_expanded_html_for_image
-from shortest_steps_context_repair import repair_target_routes, resolve_context_search_limit
+from shortest_steps_context_repair import repair_target_routes, resolve_context_search_limit, resolve_context_wide_search_limit
 from shortest_steps_order_render import build_order_html_document, collect_order_steps, order_output_path_for, render_order_text
 from shortest_steps_rebuild import load_shortest_steps, load_shortest_steps_payload, rebuild_shortest_steps_cache, resolve_rebuild_candidate_limit
 from shortest_steps_render import build_html_document, child_route, is_missing_child_route, output_path_for, recipe_ids, render_steps_tree_text, resolved_route_required_ids
@@ -597,7 +597,8 @@ def main() -> None:
             print(f"{format_object(target, show_id=args.show_id)} 不在旧最少步数表里，跳过离线旧结果", file=sys.stderr)
         if bool(args.context_repair) and step is not None:
             context_search_limit = resolve_context_search_limit(int(args.context_limit))
-            search_note = f"，内部搜索上限 {context_search_limit}" if context_search_limit != int(args.context_limit) else ""
+            context_wide_limit = resolve_context_wide_search_limit(int(args.context_limit))
+            search_note = f"，普通内部上限 {context_search_limit}，目标路径上限 {context_wide_limit}"
             print(
                 f"开始上下文局部修复：候选上限 {args.context_limit}{search_note}，深度 {args.context_depth}，中间额外步数 {args.context_extra_steps}；不写回缓存",
                 file=sys.stderr,
