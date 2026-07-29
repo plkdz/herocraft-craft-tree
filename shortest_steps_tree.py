@@ -337,6 +337,45 @@ def progress_object_label(object_id: int, obj: ApiObject | None) -> str:
     return format_object(obj, show_id=True)
 
 
+def select_shortest_actual_route(
+    target_id: int,
+    *,
+    details: dict[int, ApiObject],
+    steps_table: dict[int, dict[str, Any]],
+    show_id: bool,
+) -> dict[int, dict[str, Any]]:
+    route = steps_table.get(target_id)
+    if route is None:
+        return steps_table
+    candidates = route.get("candidates")
+    if not isinstance(candidates, list):
+        return steps_table
+    valid_candidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
+    if len(valid_candidates) <= 1:
+        return steps_table
+
+    def actual_key(candidate: dict[str, Any]) -> tuple[int, int, tuple[int, ...]]:
+        actual_steps = len(collect_order_steps(target_id, details=details, steps_table=steps_table, show_id=show_id, route_override=candidate))
+        estimated_steps = candidate.get("steps")
+        required_ids = candidate.get("required_ids")
+        return (
+            actual_steps,
+            estimated_steps if isinstance(estimated_steps, int) else 999_999,
+            tuple(value for value in required_ids if isinstance(value, int)) if isinstance(required_ids, list) else (),
+        )
+
+    best = min(valid_candidates, key=actual_key)
+    if actual_key(best) == actual_key(route):
+        return steps_table
+    updated_route = dict(route)
+    updated_route["steps"] = best.get("steps")
+    updated_route["required_ids"] = best.get("required_ids", [])
+    updated_route["recipe"] = best.get("recipe")
+    updated_steps_table = dict(steps_table)
+    updated_steps_table[target_id] = updated_route
+    return updated_steps_table
+
+
 def write_result(
     *,
     target: ApiObject,
@@ -351,6 +390,7 @@ def write_result(
     image_height: int,
 ) -> None:
     target_id = require_id(target)
+    steps_table = select_shortest_actual_route(target_id, details=details, steps_table=steps_table, show_id=show_id)
     step = steps_table.get(target_id)
     if step is None:
         fail(f"{format_object(target, show_id=show_id)} 不在最少步数表里")

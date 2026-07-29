@@ -122,6 +122,11 @@ def seed_routes(object_id: int, steps_table: dict[int, dict[str, Any]]) -> list[
     return [candidate for candidate in candidates if isinstance(candidate, dict)]
 
 
+def route_identity(route: dict[str, Any]) -> tuple[int | None, tuple[int, ...]]:
+    steps = route.get("steps")
+    return steps if isinstance(steps, int) else None, tuple(sorted(route_required_set(route)))
+
+
 def make_route(
     result_id: int,
     source: CraftSource,
@@ -314,16 +319,69 @@ def merge_repaired_routes(
     memo: dict[tuple[int, int], list[dict[str, Any]]],
     *,
     limit: int,
+    target_id: int,
+    target_routes: list[dict[str, Any]],
 ) -> dict[int, dict[str, Any]]:
     repaired = {object_id: dict(route) for object_id, route in steps_table.items()}
-    best_routes_by_id: dict[int, list[dict[str, Any]]] = {}
-    for object_id, _depth in sorted(memo, key=lambda item: item[1]):
-        routes = memo[(object_id, _depth)]
+    routes_by_id: dict[int, list[dict[str, Any]]] = {}
+    for object_id, _depth in memo:
+        routes_by_id.setdefault(object_id, []).extend(memo[(object_id, _depth)])
+    routes_by_id.setdefault(target_id, []).extend(target_routes)
+
+    lookup: dict[tuple[int, tuple[int | None, tuple[int, ...]]], dict[str, Any]] = {}
+    for object_id, route in steps_table.items():
+        for candidate in seed_routes(object_id, steps_table):
+            lookup[(object_id, route_identity(candidate))] = candidate
+        lookup[(object_id, route_identity(route))] = route
+    for object_id, routes in routes_by_id.items():
+        for route in routes:
+            lookup[(object_id, route_identity(route))] = route
+
+    forced_by_id: dict[int, list[dict[str, Any]]] = {}
+    seen_forced: set[tuple[int, tuple[int | None, tuple[int, ...]]]] = set()
+
+    def force_route(object_id: int, route: dict[str, Any]) -> None:
+        key = object_id, route_identity(route)
+        if key in seen_forced:
+            return
+        seen_forced.add(key)
+        forced_by_id.setdefault(object_id, []).append(route)
+        recipe = route.get("recipe")
+        if not isinstance(recipe, dict):
+            return
+        for id_key, steps_key, required_key in (
+            ("ingredient_a_id", "ingredient_a_steps", "ingredient_a_required_ids"),
+            ("ingredient_b_id", "ingredient_b_steps", "ingredient_b_required_ids"),
+        ):
+            child_id = recipe.get(id_key)
+            required_ids = recipe.get(required_key)
+            if not isinstance(child_id, int) or not isinstance(required_ids, list):
+                continue
+            child_steps = recipe.get(steps_key)
+            child_key = child_id, (child_steps if isinstance(child_steps, int) else None, tuple(sorted(value for value in required_ids if isinstance(value, int))))
+            child_route = lookup.get(child_key)
+            if child_route is not None:
+                force_route(child_id, child_route)
+
+    for route in target_routes:
+        force_route(target_id, route)
+
+    def merge_routes_preserving_forced(routes: list[dict[str, Any]], forced_routes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged = prune_routes(routes + forced_routes, limit=limit)
+        existing_keys = {route_identity(route) for route in merged}
+        for forced_route in forced_routes:
+            key = route_identity(forced_route)
+            if key not in existing_keys:
+                merged.append(forced_route)
+                existing_keys.add(key)
+        return sorted(dedupe_routes(merged), key=route_sort_key)
+
+    for object_id in sorted(set(routes_by_id) | set(forced_by_id)):
+        routes = routes_by_id.get(object_id, [])
         existing = repaired.get(object_id, {})
-        merged = prune_routes(seed_routes(object_id, repaired) + routes, limit=limit)
+        merged = merge_routes_preserving_forced(seed_routes(object_id, repaired) + routes, forced_by_id.get(object_id, []))
         if not merged:
             continue
-        best_routes_by_id[object_id] = merged
         best = merged[0]
         record = dict(existing)
         record["steps"] = best.get("steps")
@@ -379,7 +437,7 @@ def repair_target_routes(
     progress.report(visited_count=len(visited), memo_count=len(memo), force=True)
     if show_progress:
         print(file=sys.stderr, flush=True)
-    repaired = merge_repaired_routes(steps_table, memo, limit=limit)
+    repaired = merge_repaired_routes(steps_table, memo, limit=limit, target_id=target_id, target_routes=target_routes)
     if target_routes:
         best = target_routes[0]
         record = dict(repaired.get(target_id, {}))
@@ -400,3 +458,36 @@ def repair_target_routes(
         recipe_count=progress.recipe_count,
         combination_count=progress.combination_count,
     )
+
+
+def _self_test() -> None:
+    steps_table = {
+        10: {
+            "steps": 2,
+            "required_ids": [10, 20],
+            "recipe": {"ingredient_a_id": 1, "ingredient_b_id": 20, "ingredient_a_steps": 0, "ingredient_a_required_ids": [], "ingredient_b_steps": 1, "ingredient_b_required_ids": [20]},
+            "candidates": [],
+        },
+        20: {
+            "steps": 1,
+            "required_ids": [20],
+            "recipe": {"ingredient_a_id": 1, "ingredient_b_id": 2, "ingredient_a_steps": 0, "ingredient_a_required_ids": [], "ingredient_b_steps": 0, "ingredient_b_required_ids": []},
+            "candidates": [
+                {"steps": 1, "required_ids": [20], "recipe": {"ingredient_a_id": 1, "ingredient_b_id": 2, "ingredient_a_steps": 0, "ingredient_a_required_ids": [], "ingredient_b_steps": 0, "ingredient_b_required_ids": []}},
+                {"steps": 3, "required_ids": [20, 30, 31], "recipe": {"ingredient_a_id": 30, "ingredient_b_id": 31, "ingredient_a_steps": 1, "ingredient_a_required_ids": [30], "ingredient_b_steps": 1, "ingredient_b_required_ids": [31]}},
+            ],
+        },
+    }
+    forced_child = {"steps": 3, "required_ids": [20, 30, 31], "recipe": {"ingredient_a_id": 30, "ingredient_b_id": 31, "ingredient_a_steps": 1, "ingredient_a_required_ids": [30], "ingredient_b_steps": 1, "ingredient_b_required_ids": [31]}}
+    target_route = {
+        "steps": 4,
+        "required_ids": [10, 20, 30, 31],
+        "recipe": {"ingredient_a_id": 1, "ingredient_b_id": 20, "ingredient_a_steps": 0, "ingredient_a_required_ids": [], "ingredient_b_steps": 3, "ingredient_b_required_ids": [20, 30, 31]},
+    }
+    repaired = merge_repaired_routes(steps_table, {(20, 1): [forced_child]}, limit=1, target_id=10, target_routes=[target_route])
+    assert forced_child in repaired[20]["candidates"]
+
+
+if __name__ == "__main__":
+    _self_test()
+    print("shortest_steps_context_repair self-test passed")
