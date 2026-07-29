@@ -7,6 +7,8 @@ from typing import Any
 from herocraft_core import ApiObject, OutputFormat, default_output_path, format_object, format_operation, output_path_with_label_before_timestamp, require_id
 from tree_html_render import HtmlRecipeNode, HtmlTreeNode, badge_html, build_tree_html_document
 
+MISSING_CHILD_ROUTE_KEY = "_missing_child_candidate"
+
 
 def recipe_ids(route: dict[str, Any]) -> tuple[int, int] | None:
     recipe = route.get("recipe")
@@ -19,6 +21,17 @@ def recipe_ids(route: dict[str, Any]) -> tuple[int, int] | None:
     return left_id, right_id
 
 
+def is_missing_child_route(route: dict[str, Any] | None) -> bool:
+    return isinstance(route, dict) and route.get(MISSING_CHILD_ROUTE_KEY) is True
+
+
+def route_required_set(route: dict[str, Any]) -> set[int]:
+    required_ids = route.get("required_ids")
+    if not isinstance(required_ids, list):
+        return set()
+    return {value for value in required_ids if isinstance(value, int)}
+
+
 def child_route(
     recipe: dict[str, Any],
     required_key: str,
@@ -27,13 +40,20 @@ def child_route(
     steps_table: dict[int, dict[str, Any]],
 ) -> dict[str, Any] | None:
     child = steps_table.get(child_id)
-    if child is None:
-        return None
     required_ids = recipe.get(required_key)
-    if not isinstance(required_ids, list):
-        return child
-    required_set = set(required_ids)
     expected_steps = recipe.get(steps_key)
+    if not isinstance(required_ids, list):
+        return {
+            MISSING_CHILD_ROUTE_KEY: True,
+            "steps": expected_steps,
+            "required_ids": [],
+            "recipe": None,
+        }
+    if child is None:
+        if expected_steps == 0 and not required_ids:
+            return {"steps": 0, "required_ids": [], "recipe": None}
+        return None
+    required_set = set(required_ids)
     for candidate in child.get("candidates", ()):
         if not isinstance(candidate, dict):
             continue
@@ -41,7 +61,45 @@ def child_route(
             continue
         if set(candidate.get("required_ids", ())) == required_set:
             return candidate
-    return child
+    return {
+        MISSING_CHILD_ROUTE_KEY: True,
+        "steps": expected_steps,
+        "required_ids": sorted(required_set),
+        "recipe": None,
+    }
+
+
+def resolved_route_required_ids(
+    object_id: int,
+    steps_table: dict[int, dict[str, Any]],
+    route_override: dict[str, Any] | None = None,
+    path: frozenset[int] = frozenset(),
+) -> set[int] | None:
+    route = route_override if route_override is not None else steps_table.get(object_id)
+    if route is None or is_missing_child_route(route):
+        return None
+    ids = recipe_ids(route)
+    recipe = route.get("recipe")
+    if ids is None:
+        required_ids = route.get("required_ids")
+        if not isinstance(required_ids, list):
+            return set()
+        required_set = route_required_set(route)
+        return set() if not required_set else None
+    if not isinstance(recipe, dict) or object_id in path:
+        return None
+    left_id, right_id = ids
+    next_path = path | {object_id}
+    left_route = child_route(recipe, "ingredient_a_required_ids", "ingredient_a_steps", left_id, steps_table)
+    right_route = child_route(recipe, "ingredient_b_required_ids", "ingredient_b_steps", right_id, steps_table)
+    if left_route is None or right_route is None:
+        return None
+    left_required_ids = resolved_route_required_ids(left_id, steps_table, left_route, next_path)
+    right_required_ids = resolved_route_required_ids(right_id, steps_table, right_route, next_path)
+    if left_required_ids is None or right_required_ids is None:
+        return None
+    resolved_required_ids = {object_id, *left_required_ids, *right_required_ids}
+    return resolved_required_ids if route_required_set(route) == resolved_required_ids else None
 
 
 def render_steps_tree_text(
@@ -63,6 +121,8 @@ def render_steps_tree_text(
     route = route_override if route_override is not None else steps_table.get(object_id)
     if route is None:
         return [f"{indent}{format_object(obj, show_id=show_id)}（最少步数表不可达）"]
+    if is_missing_child_route(route):
+        return [f"{indent}{format_object(obj, show_id=show_id)}（父路线引用的子候选已被剪枝）"]
 
     steps = route.get("steps")
     line = f"{indent}{format_object(obj, show_id=show_id)} | 保守估计步数 {steps}"
@@ -82,6 +142,10 @@ def render_steps_tree_text(
     next_path = path | {object_id}
     left_route = child_route(recipe, "ingredient_a_required_ids", "ingredient_a_steps", left_id, steps_table) if isinstance(recipe, dict) else None
     right_route = child_route(recipe, "ingredient_b_required_ids", "ingredient_b_steps", right_id, steps_table) if isinstance(recipe, dict) else None
+    if left_route is None:
+        left_route = {MISSING_CHILD_ROUTE_KEY: True, "steps": None, "required_ids": [], "recipe": None}
+    if right_route is None:
+        right_route = {MISSING_CHILD_ROUTE_KEY: True, "steps": None, "required_ids": [], "recipe": None}
     lines.extend(render_steps_tree_text(left_id, details=details, steps_table=steps_table, show_id=show_id, route_override=left_route, indent=indent + "  A: ", path=next_path, expanded_ids=expanded_ids))
     lines.extend(render_steps_tree_text(right_id, details=details, steps_table=steps_table, show_id=show_id, route_override=right_route, indent=indent + "  B: ", path=next_path, expanded_ids=expanded_ids))
     return lines
@@ -113,6 +177,8 @@ def build_html_node(
     label = f"{branch_label}{format_object(obj, show_id=show_id)}"
     if route is None:
         return HtmlTreeNode(title=label, css_class="error", notes=("最少步数表不可达",))
+    if is_missing_child_route(route):
+        return HtmlTreeNode(title=label, css_class="error", notes=("父路线引用的子候选已被剪枝",))
 
     note = f"保守估计步数 {route.get('steps', '')}"
     ids = recipe_ids(route)
@@ -133,6 +199,10 @@ def build_html_node(
     next_path = path | {object_id}
     left_route = child_route(recipe, "ingredient_a_required_ids", "ingredient_a_steps", left_id, steps_table) if isinstance(recipe, dict) else None
     right_route = child_route(recipe, "ingredient_b_required_ids", "ingredient_b_steps", right_id, steps_table) if isinstance(recipe, dict) else None
+    if left_route is None:
+        left_route = {MISSING_CHILD_ROUTE_KEY: True, "steps": None, "required_ids": [], "recipe": None}
+    if right_route is None:
+        right_route = {MISSING_CHILD_ROUTE_KEY: True, "steps": None, "required_ids": [], "recipe": None}
     return HtmlTreeNode(
         title=label,
         notes=(note,),

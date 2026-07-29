@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from herocraft_core import ApiObject, format_object, format_operation, output_path_with_label_before_timestamp, require_id
-from shortest_steps_render import child_route, recipe_ids
+from shortest_steps_render import child_route, is_missing_child_route, recipe_ids, resolved_route_required_ids
 
 
 @dataclass(frozen=True)
@@ -42,6 +42,10 @@ def collect_order_steps(
     route = route_override if route_override is not None else steps_table.get(object_id)
     if route is None:
         return []
+    if is_missing_child_route(route):
+        return []
+    if resolved_route_required_ids(object_id, steps_table, route) is None:
+        return []
     ids = recipe_ids(route)
     if ids is None or object_id in path or object_id in emitted_ids:
         return []
@@ -54,6 +58,8 @@ def collect_order_steps(
     next_path = path | {object_id}
     left_route = child_route(recipe, "ingredient_a_required_ids", "ingredient_a_steps", left_id, steps_table)
     right_route = child_route(recipe, "ingredient_b_required_ids", "ingredient_b_steps", right_id, steps_table)
+    if left_route is None or right_route is None or is_missing_child_route(left_route) or is_missing_child_route(right_route):
+        return []
     steps = collect_order_steps(
         left_id,
         details=details,
