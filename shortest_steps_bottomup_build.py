@@ -19,7 +19,7 @@ import sys
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from herocraft_core import (
     CACHE_DIR,
@@ -37,6 +37,9 @@ from herocraft_core import (
 
 SHORTEST_STEPS_FILE = "shortest_steps.json"
 INT_BIT_COUNT = getattr(int, "bit_count", None)
+DEFAULT_SEARCH_LIMIT_CAP = 32
+PROPAGATION_WEIGHTED_STEP_WINDOW = 2
+OUTPUT_WEIGHTED_STEP_WINDOW = 4
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class BuildResult:
     evaluations: int
     max_evaluations: int
     search_candidate_limit: int
+    weights_by_bit: tuple[int, ...] | None
 
 
 @dataclass(frozen=True)
@@ -79,8 +83,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default="", help=f"输出文件，默认写入缓存目录下 {SHORTEST_STEPS_FILE}")
     parser.add_argument("--base-ids", default="", help="额外基础元素 id，逗号分隔")
     parser.add_argument("--base-names", default=",".join(sorted(DEFAULT_BASE_NAMES)), help="基础元素名称，逗号分隔")
-    parser.add_argument("--candidate-limit", type=int, default=24, help="每个对象最多保留的非支配候选路线数")
-    parser.add_argument("--search-candidate-limit", type=int, default=0, help="内部搜索候选上限；0 表示等于 candidate-limit")
+    parser.add_argument("--candidate-limit", type=int, default=24, help="每个对象最终最多保留的四基谱表项数")
+    parser.add_argument("--search-candidate-limit", type=int, default=0, help="内部传播四基谱表项上限；0 表示自动取 candidate-limit + 8，最高 32")
     parser.add_argument("--max-iterations", type=int, default=99999, help="最大固定点迭代轮数")
     parser.add_argument("--self-test", action="store_true", help="运行内置自检，不读取缓存")
     return parser.parse_args()
@@ -148,11 +152,26 @@ def candidate_sort_key(candidate: StepCandidate) -> tuple[int, int]:
     return candidate.steps, candidate.required_mask
 
 
+def candidate_recipe_key(candidate: StepCandidate) -> tuple[Any, ...]:
+    recipe = candidate.recipe
+    if recipe is None:
+        return ("base",)
+    return (
+        recipe.get("operation", "add"),
+        require_id(recipe["ingredient_a"]),
+        require_id(recipe["ingredient_b"]),
+    )
+
+
+def weighted_candidate_sort_key(candidate: StepCandidate, weights_by_bit: Sequence[int]) -> tuple[int, int, int]:
+    return candidate.steps, -mask_weight(candidate.required_mask, weights_by_bit), candidate.required_mask
+
+
 def mask_is_subset(left: int, right: int) -> bool:
     return left | right == right
 
 
-def mask_weight(mask: int, weights_by_bit: list[int]) -> int:
+def mask_weight(mask: int, weights_by_bit: Sequence[int]) -> int:
     score = 0
     remaining = mask
     while remaining:
@@ -164,7 +183,13 @@ def mask_weight(mask: int, weights_by_bit: list[int]) -> int:
     return score
 
 
-def prune_candidates(candidates: list[StepCandidate], *, limit: int, weights_by_bit: list[int] | None = None) -> tuple[StepCandidate, ...]:
+def prune_candidates(
+    candidates: list[StepCandidate],
+    *,
+    limit: int,
+    weights_by_bit: Sequence[int] | None = None,
+    weighted_step_window: int = PROPAGATION_WEIGHTED_STEP_WINDOW,
+) -> tuple[StepCandidate, ...]:
     unique: dict[int, StepCandidate] = {}
     for candidate in candidates:
         existing = unique.get(candidate.required_mask)
@@ -181,10 +206,32 @@ def prune_candidates(candidates: list[StepCandidate], *, limit: int, weights_by_
         kept.append(candidate)
     if weights_by_bit is None or len(kept) <= limit:
         return tuple(kept[:limit])
-    diversity_slots = max(1, limit // 8)
-    selected = kept[: max(1, limit - diversity_slots)]
-    selected_keys = {(candidate.steps, candidate.required_mask) for candidate in selected}
-    for candidate in sorted(kept, key=lambda item: (-mask_weight(item.required_mask, weights_by_bit), item.steps, item.required_mask)):
+    best_steps = kept[0].steps
+    selectable = [candidate for candidate in kept if candidate.steps <= best_steps + weighted_step_window]
+    deferred = [candidate for candidate in kept if candidate.steps > best_steps + weighted_step_window]
+    groups: defaultdict[tuple[Any, ...], list[StepCandidate]] = defaultdict(list)
+    for candidate in selectable:
+        groups[candidate_recipe_key(candidate)].append(candidate)
+    for group in groups.values():
+        group.sort(key=lambda item: weighted_candidate_sort_key(item, weights_by_bit))
+    group_keys = sorted(groups, key=lambda key: weighted_candidate_sort_key(groups[key][0], weights_by_bit))
+    selected: list[StepCandidate] = []
+    selected_keys: set[tuple[int, int]] = set()
+    max_group_size = max((len(group) for group in groups.values()), default=0)
+    for group_index in range(max_group_size):
+        for group_key in group_keys:
+            group = groups[group_key]
+            if group_index >= len(group):
+                continue
+            candidate = group[group_index]
+            key = (candidate.steps, candidate.required_mask)
+            if key in selected_keys:
+                continue
+            selected.append(candidate)
+            selected_keys.add(key)
+            if len(selected) >= limit:
+                return tuple(sorted(selected, key=candidate_sort_key))
+    for candidate in sorted(deferred, key=candidate_sort_key):
         key = (candidate.steps, candidate.required_mask)
         if key in selected_keys:
             continue
@@ -203,6 +250,12 @@ def dependency_weights_by_bit(old_required_ids_by_id: dict[int, set[int]], id_to
             if bit_index is not None:
                 weights[bit_index] += 1
     return weights
+
+
+def resolve_search_candidate_limit(candidate_limit: int, search_candidate_limit: int | None) -> int:
+    if search_candidate_limit is not None:
+        return max(candidate_limit, search_candidate_limit)
+    return max(candidate_limit, min(DEFAULT_SEARCH_LIMIT_CAP, candidate_limit + 8))
 
 
 def build_recipe_edges(details: dict[int, ApiObject]) -> tuple[RecipeEdge, ...]:
@@ -487,7 +540,7 @@ def source_candidates(
     base_names: set[str],
     candidate_limit: int,
     result_bit: int,
-    weights_by_bit: list[int] | None,
+    weights_by_bit: Sequence[int] | None,
 ) -> tuple[StepCandidate, ...]:
     options: list[tuple[StepCandidate, ...]] = []
     for ingredient in (source["ingredient_a"], source["ingredient_b"]):
@@ -502,6 +555,8 @@ def source_candidates(
     candidates: list[StepCandidate] = []
     for left in options[0]:
         for right in options[1]:
+            if (left.required_mask | right.required_mask) & result_bit:
+                continue
             required_mask = result_bit | left.required_mask | right.required_mask
             candidates.append(
                 StepCandidate(
@@ -522,7 +577,7 @@ def edge_candidates(
     base_names: set[str],
     candidate_limit: int,
     id_to_bit: dict[int, int],
-    weights_by_bit: list[int] | None,
+    weights_by_bit: Sequence[int] | None,
 ) -> tuple[StepCandidate, ...]:
     return source_candidates(
         edge.source,
@@ -552,10 +607,9 @@ def build_shortest_steps(
         old_steps_by_id = {}
     if old_required_ids_by_id is None:
         old_required_ids_by_id = {}
-    effective_search_limit = search_candidate_limit or candidate_limit
-    if effective_search_limit < candidate_limit:
-        effective_search_limit = candidate_limit
+    effective_search_limit = resolve_search_candidate_limit(candidate_limit, search_candidate_limit)
     id_to_bit, _ = build_id_bit_maps(details)
+    weights_by_bit = tuple(dependency_weights_by_bit(old_required_ids_by_id, id_to_bit)) if old_required_ids_by_id else None
     candidates_by_id: dict[int, tuple[StepCandidate, ...]] = {
         object_id: (StepCandidate(0, 0, None),)
         for object_id, obj in details.items()
@@ -660,10 +714,10 @@ def build_shortest_steps(
                 base_names=base_names,
                 candidate_limit=effective_search_limit,
                 id_to_bit=id_to_bit,
-                weights_by_bit=None,
+                weights_by_bit=weights_by_bit,
             )
         )
-        pruned = prune_candidates(candidates, limit=effective_search_limit)
+        pruned = prune_candidates(candidates, limit=effective_search_limit, weights_by_bit=weights_by_bit)
         if not pruned or pruned == candidates_by_id.get(edge.result_id):
             if show_progress:
                 now = time.time()
@@ -694,6 +748,7 @@ def build_shortest_steps(
         evaluations=evaluations,
         max_evaluations=max_evaluations,
         search_candidate_limit=effective_search_limit,
+        weights_by_bit=weights_by_bit,
     )
 
 
@@ -775,7 +830,12 @@ def build_output_payload(
     _, bit_to_id = build_id_bit_maps(details)
     candidates_by_id = build_result.routes
     output_candidates_by_id = {
-        object_id: prune_candidates(list(candidates), limit=candidate_limit)
+        object_id: prune_candidates(
+            list(candidates),
+            limit=candidate_limit,
+            weights_by_bit=build_result.weights_by_bit,
+            weighted_step_window=OUTPUT_WEIGHTED_STEP_WINDOW,
+        )
         for object_id, candidates in candidates_by_id.items()
     }
     records_by_id: dict[int, dict[tuple[int, int], StepCandidate]] = {}
@@ -823,6 +883,7 @@ def build_output_payload(
         "base_names": sorted(base_names),
         "candidate_limit": candidate_limit,
         "search_candidate_limit": build_result.search_candidate_limit,
+        "weighted_candidate_pruning": build_result.weights_by_bit is not None,
         "converged": build_result.converged,
         "remaining_queue": build_result.remaining_queue,
         "evaluations": build_result.evaluations,
@@ -928,10 +989,10 @@ def self_test() -> None:
         show_progress=False,
     )
     assert build_result.converged
-    assert build_result.search_candidate_limit == 8
+    assert build_result.search_candidate_limit == 16
     assert best_candidate(build_result.routes[10]).steps == 1
     assert best_candidate(build_result.routes[11]).steps == 2
-    shared_candidate = StepCandidate(3, 0b111000, None)
+    shared_candidate = StepCandidate(2, 0b111000, None)
     short_candidate = StepCandidate(1, 0b000001, None)
     other_short_candidate = StepCandidate(2, 0b000010, None)
     diverse = prune_candidates(
@@ -941,6 +1002,31 @@ def self_test() -> None:
     )
     assert short_candidate in diverse
     assert shared_candidate in diverse
+    number_ten: ApiObject = {"id": 20, "name": "十", "type": "concept", "emoji": "🔢"}
+    number_twenty: ApiObject = {"id": 30, "name": "二十", "type": "concept", "emoji": "🔢"}
+    letter: ApiObject = {"id": 40, "name": "字母", "type": "concept", "emoji": "🔤"}
+    payload_details = {1: water, 2: fire, 10: steam, 20: number_ten, 30: number_twenty, 40: letter}
+    payload_short_candidate = StepCandidate(1, 0b000100, None)
+    payload_other_short_candidate = StepCandidate(2, 0b001000, None)
+    payload_shared_candidate = StepCandidate(2, 0b010000, None)
+    weighted_payload = build_output_payload(
+        payload_details,
+        BuildResult(
+            routes={40: (payload_short_candidate, payload_other_short_candidate, payload_shared_candidate)},
+            converged=True,
+            remaining_queue=0,
+            evaluations=1,
+            max_evaluations=1,
+            search_candidate_limit=3,
+            weights_by_bit=(0, 0, 0, 0, 10, 0),
+        ),
+        base_ids={1, 2},
+        base_names={"水", "火"},
+        candidate_limit=2,
+    )
+    payload_required_ids = {tuple(candidate["required_ids"]) for candidate in weighted_payload["steps"]["40"]["candidates"]}
+    assert (10,) in payload_required_ids
+    assert (30,) in payload_required_ids
     loop_a: ApiObject = {
         "id": 20,
         "name": "环甲",
@@ -954,6 +1040,16 @@ def self_test() -> None:
         "craft_sources": [{"operation": "add", "ingredient_a": {"id": 20, "name": "环甲", "type": "item"}, "ingredient_b": fire}],
     }
     loop_details = {1: water, 2: fire, 20: loop_a, 21: loop_b}
+    loop_build_result = build_shortest_steps(
+        loop_details,
+        base_ids={1, 2},
+        base_names={"水", "火"},
+        candidate_limit=8,
+        max_iterations=10,
+        show_progress=False,
+    )
+    assert 20 not in loop_build_result.routes
+    assert 21 not in loop_build_result.routes
     component_by_id, component_sizes = build_dependency_components(loop_details)
     assert component_by_id[20] == component_by_id[21]
     assert component_sizes[component_by_id[20]] == 2
