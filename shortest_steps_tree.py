@@ -3,8 +3,8 @@ from __future__ import annotations
 # 文件职责：读取持久化最少步数表，查询某个物品的最少步数合成树。
 #
 # 常用命令：
-# python shortest_steps_tree.py 蒸汽 元素 --image
-# python shortest_steps_tree.py 末日鱼雷 装备 --show-id --image
+# python shortest_steps_tree.py 蒸汽 元素
+# python shortest_steps_tree.py 末日鱼雷 装备 --show-id
 
 import argparse
 import contextlib
@@ -57,7 +57,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--show-id", action="store_true", help="显示对象 id")
     parser.add_argument("--format", choices=["text", "html"], default="html", help="输出格式")
     parser.add_argument("--output", default="", help="输出文件路径")
-    parser.add_argument("--image", action="store_true", help="把 HTML 全部展开后截图为完整 PNG")
+    parser.add_argument("--image", dest="image", action="store_true", default=None, help="把 HTML 全部展开后截图为完整 PNG；HTML 输出默认开启")
+    parser.add_argument("--no-image", dest="image", action="store_false", help="只输出 HTML，不生成 PNG")
     parser.add_argument("--image-output", default="", help="PNG 输出路径；默认跟 HTML 同名")
     parser.add_argument("--image-width", type=int, default=1800, help="截图视口宽度")
     parser.add_argument("--image-height", type=int, default=1000, help="截图视口高度")
@@ -575,6 +576,7 @@ def main() -> None:
                 flush=True,
             )
         output_format: OutputFormat = str(args.format)  # type: ignore[assignment]
+        output_image = output_format == "html" if args.image is None else bool(args.image)
         output_path = str(args.output) if args.output else output_path_for(target, output_format)
         if step is not None:
             print("输出上下文修复结果" if used_context_repair else "输出离线旧结果")
@@ -585,7 +587,7 @@ def main() -> None:
                 output_format=output_format,
                 output_path=output_path,
                 show_id=bool(args.show_id),
-                image=bool(args.image),
+                image=output_image,
                 image_output=str(args.image_output),
                 image_width=int(args.image_width),
                 image_height=int(args.image_height),
@@ -690,7 +692,7 @@ def main() -> None:
             output_format=output_format,
             output_path=dynamic_output_path,
             show_id=bool(args.show_id),
-            image=bool(args.image),
+            image=output_image,
             image_output="",
             image_width=int(args.image_width),
             image_height=int(args.image_height),

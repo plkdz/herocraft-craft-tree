@@ -13,8 +13,8 @@
 
 ```powershell
 python shortest_steps_tree.py 蒸汽 元素
-python shortest_steps_tree.py 蒸汽 元素 --image
-python shortest_steps_tree.py 末日鱼雷 装备 --show-id --image
+python shortest_steps_tree.py 蒸汽 元素 --no-image
+python shortest_steps_tree.py 末日鱼雷 装备 --show-id
 python shortest_steps_tree.py 野兽先辈 生物 --context-repair true
 python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
 ```
@@ -34,7 +34,9 @@ python shortest_steps_bottomup_build.py
 - `--show-id` 在输出里显示对象 id。
 - `--format` 指定输出格式，`html` 或 `text`，默认 `html`。
 - `--output` 指定输出文件路径；不指定时写入 `results/名称-类型_tree_steps-时间戳.*`。
-- `--image` 会把旧树状图 HTML 自动全部展开后渲染成完整 PNG，并同时把 `_tree_steps_order-时间戳.html` 顺序表渲染成同名 `.png`。
+- 默认会把旧树状图 HTML 自动全部展开后渲染成完整 PNG，并同时把 `_tree_steps_order-时间戳.html` 顺序表渲染成同名 `.png`。
+- `--no-image` 只输出 HTML，不生成 PNG。
+- `--image` 保留为显式开启图片输出的兼容参数。
 - `--image-output` 指定 PNG 输出路径，默认跟 HTML 同名。
 - `--image-width` 和 `--image-height` 控制渲染初始视口和最小输出尺寸。
 - `--dynamic-refresh true/false` 控制是否先输出旧结果，再刷新旧路线相关对象详情；如果配方没有变化，会跳过最少步数全量重算。裸 `--dynamic-refresh` 仍等价于 `true`。
