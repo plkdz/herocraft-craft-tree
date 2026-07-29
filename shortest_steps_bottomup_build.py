@@ -628,8 +628,13 @@ def build_shortest_steps(
 
     def report_progress() -> None:
         converged_label = "已收敛" if not queue else "传播中"
+        elapsed = time.time() - started_at
+        queue_items_per_second = evaluations / elapsed if elapsed > 0 and evaluations > 0 else 0.0
+        eta_seconds = len(queue) * 2 / queue_items_per_second if queue_items_per_second > 0 else None
+        eta_label = f"{eta_seconds:7.1f}s" if eta_seconds is not None else "      -"
         print(
-            f"\r耗时 {time.time() - started_at:6.1f}s | "
+            f"\r耗时 {elapsed:6.1f}s | "
+            f"预计剩余(当前队列) {eta_label} | "
             f"检查配方 {evaluations} | "
             f"基础可达 {len(candidates_by_id)}/{len(details)} | "
             f"队列 {len(queue)} | {converged_label}",
