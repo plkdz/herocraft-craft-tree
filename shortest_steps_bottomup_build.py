@@ -163,8 +163,21 @@ def candidate_recipe_key(candidate: StepCandidate) -> tuple[Any, ...]:
     )
 
 
-def weighted_candidate_sort_key(candidate: StepCandidate, weights_by_bit: Sequence[int]) -> tuple[int, int, int]:
-    return candidate.steps, -mask_weight(candidate.required_mask, weights_by_bit), candidate.required_mask
+def candidate_material_cost(candidate: StepCandidate) -> int:
+    if candidate.ingredient_candidates is None:
+        return candidate.steps
+    left, right = candidate.ingredient_candidates
+    return 1 + left.steps + right.steps
+
+
+def weighted_candidate_sort_key(candidate: StepCandidate, weights_by_bit: Sequence[int]) -> tuple[Any, ...]:
+    return (
+        candidate.steps,
+        candidate_material_cost(candidate),
+        -mask_weight(candidate.required_mask, weights_by_bit),
+        candidate_recipe_key(candidate),
+        candidate.required_mask,
+    )
 
 
 def mask_is_subset(left: int, right: int) -> bool:
@@ -217,21 +230,13 @@ def prune_candidates(
     group_keys = sorted(groups, key=lambda key: weighted_candidate_sort_key(groups[key][0], weights_by_bit))
     selected: list[StepCandidate] = []
     selected_keys: set[tuple[int, int]] = set()
-    max_group_size = max((len(group) for group in groups.values()), default=0)
-    for group_index in range(max_group_size):
-        for group_key in group_keys:
-            group = groups[group_key]
-            if group_index >= len(group):
-                continue
-            candidate = group[group_index]
-            key = (candidate.steps, candidate.required_mask)
-            if key in selected_keys:
-                continue
-            selected.append(candidate)
-            selected_keys.add(key)
-            if len(selected) >= limit:
-                return tuple(sorted(selected, key=candidate_sort_key))
-    for candidate in sorted(deferred, key=candidate_sort_key):
+    for group_key in group_keys:
+        candidate = groups[group_key][0]
+        selected.append(candidate)
+        selected_keys.add((candidate.steps, candidate.required_mask))
+        if len(selected) >= limit:
+            return tuple(sorted(selected, key=candidate_sort_key))
+    for candidate in sorted(selectable, key=lambda item: weighted_candidate_sort_key(item, weights_by_bit)):
         key = (candidate.steps, candidate.required_mask)
         if key in selected_keys:
             continue
@@ -239,6 +244,14 @@ def prune_candidates(
         selected_keys.add(key)
         if len(selected) >= limit:
             break
+    for candidate in sorted(deferred, key=candidate_sort_key):
+        if len(selected) >= limit:
+            break
+        key = (candidate.steps, candidate.required_mask)
+        if key in selected_keys:
+            continue
+        selected.append(candidate)
+        selected_keys.add(key)
     return tuple(sorted(selected, key=candidate_sort_key))
 
 
