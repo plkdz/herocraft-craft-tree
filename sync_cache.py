@@ -116,6 +116,19 @@ def format_seconds(seconds: float) -> str:
     return f"{minute:d}:{second:02d}"
 
 
+def estimate_remaining_seconds(
+    *,
+    started_at: float,
+    now: float,
+    successful_count: int,
+    remaining_count: int,
+    fallback_seconds_per_item: float,
+) -> float:
+    if successful_count <= 0:
+        return remaining_count * fallback_seconds_per_item
+    return remaining_count * ((now - started_at) / successful_count)
+
+
 def refresh_one_detail(
     client: HeroCraftClient,
     object_id: int,
@@ -157,13 +170,22 @@ def refresh_details(
     if client.max_workers <= 1 or len(object_ids) <= 1:
         failures: list[DetailFailure] = []
         started_at = time.time()
+        successful_count = 0
         for index, object_id in enumerate(object_ids, 1):
             global_index = start_index + index - 1
-            remaining_seconds = (len(object_ids) - index) * detail_delay
+            now = time.time()
+            remaining_count = len(object_ids) - index + 1
+            remaining_seconds = estimate_remaining_seconds(
+                started_at=started_at,
+                now=now,
+                successful_count=successful_count,
+                remaining_count=remaining_count,
+                fallback_seconds_per_item=detail_delay,
+            )
             print(
                 f"\r同步详情 | "
                 f"{global_index}/{total_count} | "
-                f"耗时 {format_seconds(time.time() - started_at)} | "
+                f"耗时 {format_seconds(now - started_at)} | "
                 f"预计剩余 {format_seconds(remaining_seconds)} | "
                 f"{format_detail_label(object_id, object_lookup)}",
                 end="",
@@ -173,6 +195,8 @@ def refresh_details(
             failure = refresh_one_detail(client, object_id, detail_delay, retry_rounds, log_file)
             if failure is not None:
                 failures.append(failure)
+            else:
+                successful_count += 1
         print(file=sys.stderr, flush=True)
         return failures
     fail("限速同步必须单线程")
