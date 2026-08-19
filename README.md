@@ -10,19 +10,8 @@ HeroCraft 合成树查询与 HTML 可视化工具。
 
 最快使用：
 
-1. 获得 session：浏览器登录 HeroCraft 后，在开发者工具 Network 里打开 `/api/auth/me`，复制请求头里的 `Cookie: hc_session=...`，写入 `.herocraft_session`。
-
-```powershell
-Set-Content -Path .herocraft_session -Encoding utf8 -Value '这里粘贴 hc_session 的值，不要带 hc_session='
-```
-
-例如：
-
-```powershell
-Set-Content -Path .herocraft_session -Encoding utf8 -Value '123456=.123456'
-```
-
-注意，只复制纯字符。
+1. 获得 session：浏览器登录 HeroCraft 后，在开发者工具 Network 里打开 `/api/auth/me`，复制请求头里的 `Cookie: hc_session=...`。
+   用文本编辑器打开 `.herocraft_session.txt`，只把 `hc_session=` 后面的值复制粘贴进去，然后保存。
 
 1. 同步缓存：
 
@@ -30,70 +19,65 @@ Set-Content -Path .herocraft_session -Encoding utf8 -Value '123456=.123456'
 python sync_cache.py
 ```
 
+正常刷新用 `python sync_cache.py`；只想补齐本机缺失详情、确定旧缓存不用重新拉时，用 `python sync_cache.py --missing-only`。
+
+1. 构建最少步数表：
+
+```powershell
+python shortest_steps_bottomup_build.py
+```
+
+默认读取 `.herocraft_cache/object_details.json`，写入 `.herocraft_cache/shortest_steps.json`；默认基础元素是水、火、土、风，`--candidate-limit 24`，`--search-candidate-limit 32`，`--max-iterations 99999`。
+第一次会生成启发表；需要更稳定的排序启发时，再运行同一条命令一遍。
+
 1. 查询配方：
 
 ```powershell
-python shortest_depth_tree.py 蒸汽 元素 --max-depth 999 --workers 20 --deep-workers 6 --single-shortest-route --image
+python shortest_steps_tree.py 蒸汽 元素
 ```
 
-常用命令：
+细致上下文修复查询（可选）：
 
 ```powershell
-python shortest_depth_tree.py 太空电梯 装备 --max-depth 5 --workers 20 --deep-workers 6
-python shortest_depth_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6
-python shortest_depth_tree.py 蒸汽 元素 --max-depth 2 --workers 20 --deep-workers 6 --image
-python shortest_depth_tree.py 末日鱼雷 装备 --max-depth 999 --workers 20 --deep-workers 6 --single-shortest-route --image
-python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6
-python shortest_depth_tree.py 天基量子战争元帅 生物 --max-depth 100 --workers 20 --deep-workers 6 --show-all-sources
-python sync_cache.py
-python sync_cache.py --missing-only
-python shortest_steps_bottomup_build.py
-python shortest_steps_bottomup_build.py --candidate-limit 24 --max-iterations 99999
-python shortest_steps_tree.py 蒸汽 元素
-python shortest_steps_tree.py 野兽先辈 生物 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
-python shortest_steps_recipe_stats.py
+python shortest_steps_tree.py 蒸汽 元素 --context-repair true --context-limit 24 --context-depth 8 --context-extra-steps 4
+```
+
+动态更新查询（可选）：
+
+```powershell
+python shortest_steps_tree.py 蒸汽 元素 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
+```
+
+上下文修复和动态更新可以共用：
+
+```powershell
+python shortest_steps_tree.py 蒸汽 元素 --context-repair true --context-limit 24 --context-depth 8 --context-extra-steps 4 --dynamic-refresh true --dynamic-min-expand 0 --dynamic-max-expand 1
+```
+
+查询参数作用：
+
+- `--context-repair true`：对当前目标做局部上下文重组，不写回全局最少步数表。
+- `--context-limit 24`：上下文修复时，每个节点最多保留 24 个候选。
+- `--context-depth 8`：上下文修复最多向下递归 8 层。
+- `--context-extra-steps 4`：允许中间节点比旧表记录多 4 步，用来找被全局剪枝漏掉但对当前目标有用的路线。
+- `--dynamic-refresh true`：先输出旧结果，再刷新目标路线相关对象；发现配方变化时会重算最少步数表。
+- `--dynamic-min-expand 0`：即使配方没变化，也至少继续扩散刷新的层数。
+- `--dynamic-max-expand 1`：配方发生变化后，沿变化链最多继续扩散刷新的层数。
+
+1. 查看不可达/缺失物品链：
+
+```powershell
 python shortest_steps_unreachable.py
 ```
 
-默认输出 HTML，结果写入 `results/名称-类型_tree-时间戳.html`。HTML 合成树从左到右横向展开，默认居中到根节点，支持展开折叠、滚轮缩放、右键拖动平移、重置视角；全部展开和全部折叠后也会重新居中。
-加 `--image` 会把 HTML 自动全部展开、解除视口裁剪后分块渲染并拼成完整 PNG，不是当前视口截图；PNG 默认与 HTML 同名。
-如果存在不可达底层阻塞点，还会额外生成 `_tree_blockers-时间戳.txt` 完整列表和 `_tree_blockers-时间戳.html` 树状影响图；影响图按真实依赖层级展示，不是单层列表，根阻塞点横向排列并支持展开折叠、缩放和平移。
+它会扫描当前 `.herocraft_cache/shortest_steps.json`，输出哪些对象还不能从基础元素合成，并按底层阻塞点影响数量生成 HTML/TXT 报告。
 
-本机缓存会写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session`，这些文件不会提交。`shortest_depth_tree.py` 只读本机缓存，不发网络请求；外部配方或物品栏可能更新时，统一用 `sync_cache.py` 全量同步缓存：它会重新拉取已发现物品列表，并按 API 当前限流对去重后的每个对象 id 请求一次详情。需要刷新持久化最少步数表时，再运行 `python shortest_steps_bottomup_build.py`，输出 `.herocraft_cache/shortest_steps.json`。仓库归档使用压缩后的 `.herocraft_cache/shortest_steps.json.gz`，本机运行仍读取未压缩 JSON。
+输出和文件：
 
-最少步数树由 `shortest_steps_tree.py` 查询，使用 `shortest_steps_bottomup_build.py` 预生成的自下而上持久化表；预生成表里的步数是保守估计，实际最小步数以顺序表展开结果为准。查询最少步数 HTML 时会保留旧树状图，并额外生成 `_tree_steps_order-时间戳.html` 合成顺序表；默认也会额外生成同名 `.png`，需要只生成 HTML 时加 `--no-image`。加 `--dynamic-refresh true` 时会先输出旧结果，再刷新旧路线相关对象；如果没有配方变化，会跳过全量重算。
-
-最少步数不可达统计由 `shortest_steps_unreachable.py` 生成，输出当前最少步数表里哪些对象不可达，并按底层阻塞点影响数量排序生成 HTML/TXT；`--dynamic-refresh true` 会只检查不可达对象是否仍在物品栏，并刷新这些不可达对象的详情。
-
-常用参数：
-
-- `item`：对象名称或对象 id，默认 `天基量子战争元帅`。
-- `item_type`：对象类型，可用 `元素`、`物品`、`装备`、`生物`、`概念`，默认 `生物`。
-- `--max-depth`：最大展开深度；动态规划仍会用这个上限判断基础可达路线。
-- `--no-global-dedupe`：关闭全局去重，允许同一对象在不同线路重复展开。
-- `--show-all-sources`：显示全部已知配方；不加时只显示基础可达的最短深度配方。
-- `--single-shortest-route`：只保留一条基础可达深度最小路线；默认仍使用全局去重保证速度，如需重复子树也完整展开，再加 `--no-global-dedupe`。
-- `--workers`：批量请求对象详情的并发数。
-- `--branch-workers`：单条配方 A/B 分支并发数，最多有效值是 2。
-- `--deep-workers`：递归判定路线时的内部并发数。
-- `--cache-dir`：本机缓存目录。
-- `--show-id`：在输出里显示对象 id。
-- `--format`：输出格式，`html` 或 `text`，默认 `html`。
-- `--output`：输出文件路径；不指定时写入 `results/名称-类型_tree-时间戳.*`。
-- `--image`：把 HTML 自动全部展开后渲染成完整 PNG；`shortest_steps_tree.py` 默认开启。
-- `--no-image`：`shortest_steps_tree.py` 只输出 HTML，不生成 PNG。
-- `--image-output`：PNG 输出路径；默认跟 HTML 同名。
-- `--image-width`：图片渲染初始视口宽度，也是最小输出宽度。
-- `--image-height`：图片渲染初始视口高度，也是最小输出高度。
-- `--base-ids`：额外指定作为尽头的基础元素 id，逗号分隔。
-- `--base-names`：作为尽头的基础元素名称，默认水、火、土、风。
-
-缓存同步参数：
-
-- `sync_cache.py --missing-only`：只补齐本机没有详情缓存的对象；如果外部配方变了，仍应跑不带此参数的全量刷新。
-- `sync_cache.py --requests-per-minute 50 --retry-rounds 3`：控制详情同步限速和失败重试；这也是默认值。
-- `sync_cache.py --start-index 1200`：从去重后的详情请求列表指定位置继续同步。
-- `sync_cache.py --only-ids 1,2,3`：只同步指定对象 id。
+- 本机缓存写入 `.herocraft_cache/`，会话 cookie 放在 `.herocraft_session.txt`；这些文件不会提交。
+- 查询结果默认写入 `results/名称-类型_tree_steps-时间戳.html`，并生成同名 PNG。
+- 最少步数查询会额外生成 `_tree_steps_order-时间戳.html` 合成顺序表。
+- 只想生成 HTML 时，给 `shortest_steps_tree.py` 加 `--no-image`。
 
 源码说明：
 
