@@ -7,11 +7,14 @@ import os
 import re
 import sys
 import time
+import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, Literal, NoReturn, Optional, TypedDict
 
 BASE_URL = "http://toogle.club:36024/api"
-SESSION_FILE = ".herocraft_session"
+SESSION_FILE = ".herocraft_session.txt"
+LEGACY_SESSION_FILE = ".herocraft_session"
+SESSION_FILE_CANDIDATES = (SESSION_FILE, LEGACY_SESSION_FILE)
 RESULTS_DIR = "results"
 CACHE_DIR = ".herocraft_cache"
 DETAIL_CACHE_FILE = "object_details.json"
@@ -234,8 +237,45 @@ def parse_type_filter(raw_value: str) -> set[str] | None:
     return matched
 
 
+def is_session_edge_char(char: str) -> bool:
+    return char.isspace() or unicodedata.category(char) in {"Cc", "Cf"}
+
+
+def strip_session_edge_chars(value: str) -> str:
+    start = 0
+    end = len(value)
+    while start < end and is_session_edge_char(value[start]):
+        start += 1
+    while end > start and is_session_edge_char(value[end - 1]):
+        end -= 1
+    return value[start:end]
+
+
+def clean_session_cookie(raw_value: str) -> str:
+    value = strip_session_edge_chars(raw_value).strip("'\"")
+    value = strip_session_edge_chars(value)
+    if value.lower().startswith("cookie:"):
+        value = strip_session_edge_chars(value.partition(":")[2])
+    for cookie_part in value.split(";"):
+        key, separator, cookie_value = strip_session_edge_chars(cookie_part).partition("=")
+        if separator and key.strip() == "hc_session":
+            value = cookie_value
+            break
+    if value.startswith("hc_session="):
+        value = value.partition("=")[2]
+    return strip_session_edge_chars(value).strip("'\"")
+
+
 def load_session_from_file(path: str = SESSION_FILE) -> str:
-    if not os.path.exists(path):
-        return ""
-    with open(path, "r", encoding="utf-8") as file:
-        return file.read().strip().strip('"')
+    paths = SESSION_FILE_CANDIDATES if path == SESSION_FILE else (path,)
+    for session_path in paths:
+        if not os.path.exists(session_path):
+            continue
+        with open(session_path, "r", encoding="utf-8-sig") as file:
+            return clean_session_cookie(file.read())
+    return ""
+
+
+def demo_session_cookie_cleaning() -> None:
+    assert clean_session_cookie("\ufeff'hc_session=abc='\u202c\u200b") == "abc="
+    assert clean_session_cookie("Cookie: other=1; hc_session=abc=; theme=dark\u202c") == "abc="

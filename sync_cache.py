@@ -21,6 +21,7 @@ from herocraft_core import (
     SESSION_FILE,
     ApiObject,
     ProgressStats,
+    clean_session_cookie,
     fail,
     format_object,
     load_session_from_file,
@@ -227,7 +228,7 @@ def main() -> None:
     print(f"同步日志：{log_file.name}", file=sys.stderr)
 
     try:
-        cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+        cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
         if not cookie:
             fail("缺少 cookie。传 --cookie 或设置 HEROCRAFT_SESSION 环境变量。")
 

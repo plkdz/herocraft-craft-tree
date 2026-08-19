@@ -24,7 +24,7 @@ from shortest_steps_bottomup_build import (
 )
 from herocraft_client import ClientConfig, HeroCraftClient
 from herocraft_core import CACHE_DIR, RESULTS_DIR, ApiObject, fail, format_object, is_base_object, parse_bool, safe_filename_part
-from herocraft_core import BASE_URL, DETAIL_CACHE_FILE, SESSION_FILE, load_session_from_file, require_id
+from herocraft_core import BASE_URL, DETAIL_CACHE_FILE, SESSION_FILE, clean_session_cookie, load_session_from_file, require_id
 from shortest_depth_tree import (
     build_blocker_html_report,
     build_blocker_report,
@@ -148,9 +148,9 @@ def refresh_object_detail_with_retry(
 
 
 def sync_missing_inventory_details(args: argparse.Namespace) -> None:
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+    cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
     if not cookie:
-        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session")
+        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session.txt")
     client = HeroCraftClient(
         ClientConfig(
             base_url=str(args.base_url).rstrip("/"),
@@ -200,9 +200,9 @@ def sync_missing_inventory_details(args: argparse.Namespace) -> None:
 
 
 def refresh_inventory_and_unreachable_details(args: argparse.Namespace, unreachable_ids: set[int]) -> tuple[set[int], int]:
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+    cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
     if not cookie:
-        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session")
+        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session.txt")
     client = HeroCraftClient(
         ClientConfig(
             base_url=str(args.base_url).rstrip("/"),

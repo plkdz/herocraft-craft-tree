@@ -19,6 +19,7 @@ from herocraft_core import (
     ApiObject,
     CraftSource,
     ProgressStats,
+    clean_session_cookie,
     fail,
     format_object,
     format_type_filter,
@@ -277,7 +278,7 @@ def main() -> None:
     if not base_names:
         fail("--base-names 不能为空")
 
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+    cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
     if not cookie:
         fail("缺少 cookie。传 --cookie 或设置 HEROCRAFT_SESSION 环境变量。")
 

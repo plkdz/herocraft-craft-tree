@@ -7,12 +7,11 @@
 ```powershell
 python shortest_steps_unreachable.py
 python shortest_steps_unreachable.py --hide-id
-python shortest_steps_unreachable.py --dynamic-refresh true
-python shortest_steps_unreachable.py --dynamic-refresh true --requests-per-minute 50
 ```
 
 输出逻辑：
 
+- 依赖已经生成好的 `.herocraft_cache/shortest_steps.json`，不会直接从接口现算最少步数表。
 - 默认写入 `results/shortest_steps_unreachable-时间戳.html`。
 - 同时写出同名 `.txt` 完整列表。
 - 默认显示对象 id；加 `--hide-id` 才隐藏。
@@ -45,7 +44,7 @@ python shortest_steps_unreachable.py --dynamic-refresh true --requests-per-minut
 - `--dynamic-refresh true/false` 开启或关闭物品栏校验、不可达详情刷新和必要时的最少步数重算。
 - `--requests-per-minute` 控制动态刷新详情请求速度，默认 50 次/分钟。
 - `--retry-rounds` 控制单个详情失败重试次数，默认 5。
-- `--cookie`、`--base-url`、`--timeout` 只在动态刷新时使用。
+- `--cookie`、`--base-url`、`--timeout` 只在动态刷新时使用；`--cookie` 不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session.txt`。
 
 关键函数：
 

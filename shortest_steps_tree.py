@@ -29,6 +29,7 @@ from herocraft_core import (
     SESSION_FILE,
     OutputFormat,
     ApiObject,
+    clean_session_cookie,
     fail,
     format_object,
     iter_sources,
@@ -45,6 +46,10 @@ from shortest_steps_context_repair import repair_target_routes, resolve_context_
 from shortest_steps_order_render import build_order_html_document, collect_order_steps, order_output_path_for, render_order_text
 from shortest_steps_rebuild import load_shortest_steps, load_shortest_steps_payload, rebuild_shortest_steps_cache, resolve_rebuild_candidate_limit
 from shortest_steps_render import build_html_document, child_route, is_missing_child_route, output_path_for, recipe_ids, render_steps_tree_text, resolved_route_required_ids
+
+BROKEN_ROUTE_HINT = (
+    "物品链断了。运行 python shortest_steps_unreachable.py 查看不可达/缺失物品链。"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -143,9 +148,9 @@ def refresh_object_detail_with_retry(
 
 
 def refresh_missing_target(args: argparse.Namespace, object_id: int) -> ApiObject:
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+    cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
     if not cookie:
-        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session")
+        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session.txt")
     client = HeroCraftClient(
         ClientConfig(
             base_url=str(args.base_url).rstrip("/"),
@@ -173,9 +178,9 @@ def refresh_missing_target(args: argparse.Namespace, object_id: int) -> ApiObjec
 
 
 def refresh_inventory_for_dynamic(args: argparse.Namespace) -> None:
-    cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+    cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
     if not cookie:
-        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session")
+        raise RuntimeError("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session.txt")
     client = HeroCraftClient(
         ClientConfig(
             base_url=str(args.base_url).rstrip("/"),
@@ -343,6 +348,10 @@ def progress_object_label(object_id: int, obj: ApiObject | None) -> str:
     return format_object(obj, show_id=True)
 
 
+def print_broken_route_hint() -> None:
+    print(BROKEN_ROUTE_HINT, file=sys.stderr)
+
+
 def select_shortest_actual_route(
     target_id: int,
     *,
@@ -403,8 +412,10 @@ def write_result(
     steps_table = select_shortest_actual_route(target_id, details=details, steps_table=steps_table, show_id=show_id)
     step = steps_table.get(target_id)
     if step is None:
-        fail(f"{format_object(target, show_id=show_id)} 不在最少步数表里")
+        fail(f"{format_object(target, show_id=show_id)} 不在最少步数表里。{BROKEN_ROUTE_HINT}")
     resolved_required_ids = resolved_route_required_ids(target_id, steps_table, step)
+    if resolved_required_ids is None:
+        print_broken_route_hint()
     actual_step_count = len(resolved_required_ids) if resolved_required_ids is not None else int(step.get("steps", 0))
     if output_format == "text":
         content = (
@@ -593,8 +604,12 @@ def main() -> None:
         used_context_repair = False
         if step is None:
             if not args.dynamic_refresh:
-                fail(f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。先同步缓存并运行 python shortest_steps_bottomup_build.py")
+                fail(
+                    f"{format_object(target, show_id=args.show_id)} 不在最少步数表里。"
+                    f"先同步缓存并运行 python shortest_steps_bottomup_build.py。{BROKEN_ROUTE_HINT}"
+                )
             print(f"{format_object(target, show_id=args.show_id)} 不在旧最少步数表里，跳过离线旧结果", file=sys.stderr)
+            print_broken_route_hint()
         if bool(args.context_repair) and step is not None:
             context_search_limit = resolve_context_search_limit(int(args.context_limit))
             context_wide_limit = resolve_context_wide_search_limit(int(args.context_limit))
@@ -650,9 +665,9 @@ def main() -> None:
         if not args.dynamic_refresh:
             return
 
-        cookie = str(args.cookie).strip().strip('"') or load_session_from_file()
+        cookie = clean_session_cookie(str(args.cookie)) or load_session_from_file()
         if not cookie:
-            fail("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session")
+            fail("动态刷新缺少 cookie。传 --cookie、设置 HEROCRAFT_SESSION 或写入 .herocraft_session.txt")
         detail_delay = 60.0 / float(args.requests_per_minute)
         print(
             f"开始动态刷新：刷新上限 {args.dynamic_max_refresh} 个对象，"
@@ -718,6 +733,7 @@ def main() -> None:
         dynamic_step = dynamic_steps.get(target_id)
         if dynamic_step is None:
             print("动态重算后目标不可达，保留旧结果", file=sys.stderr)
+            print_broken_route_hint()
             if old_route_valid and os.path.exists(previous_steps_path):
                 shutil.copy2(previous_steps_path, steps_path)
                 print(f"旧路线仍有效，已恢复最少步数缓存：{steps_path}", file=sys.stderr)

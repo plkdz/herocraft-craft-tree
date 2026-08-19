@@ -25,6 +25,7 @@ python recursive_refresh_tree_experiment.py 野兽先辈 生物 --refresh-missin
 - `--requests-per-minute` 大于 0 时按每分钟请求数覆盖 `--detail-delay`。
 - `--refresh-missing-only` 只补缺失详情，已有缓存不请求服务器。
 - `--base-names` 指定基础元素名称，到基础元素停止展开。
+- `--cookie` 指定 `hc_session`；不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session.txt`。
 - `--quiet` 只输出最终统计。
 
 边界：

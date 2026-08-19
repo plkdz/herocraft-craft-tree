@@ -1,4 +1,5 @@
 .herocraft_session
+.herocraft_session.txt
 .herocraft_cache/
 results/
 __pycache__/

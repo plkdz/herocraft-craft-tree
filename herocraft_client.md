@@ -6,7 +6,7 @@
 
 - `.herocraft_cache/object_details.json`：对象详情缓存。
 - `.herocraft_cache/inventory.json`：当前账号已发现对象缓存。
-- `.herocraft_session`：明文保存 `hc_session` 值，不提交。
+- `.herocraft_session.txt`：明文保存 `hc_session` 值，不提交。
 
 主要类型：
 

@@ -65,7 +65,7 @@ python shortest_steps_bottomup_build.py
 - 开启 `--context-repair true` 后，会先用目标上下文重组局部候选，再按修复后的内存表输出；这用于处理“某个中间物品自身路线略长，但能和目标另一分支共享大量前置”的情况。
 - 同一对象全局只展开一次；后续再次出现时保留节点，并提示“全局去重：已在其他位置展开”。
 - 基础元素显示 `保守估计步数 0 | 基础元素`。
-- 如果目标不在最少步数表里，说明当前缓存下无法从基础元素合成，或需要重新运行 `sync_cache.py` 和 `shortest_steps_bottomup_build.py`。
+- 如果目标不在最少步数表里，或父路线引用的子候选已被剪枝，命令行会提示运行 `python shortest_steps_unreachable.py` 查看不可达/缺失物品链。
 - 动态刷新只有在检测到配方变化时才会重算并覆盖 `.herocraft_cache/shortest_steps.json`；无变化时旧结果就是当前结果。
 
 关键函数：

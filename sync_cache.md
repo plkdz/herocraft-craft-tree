@@ -38,7 +38,7 @@ python sync_cache.py --only-ids 1,2,3
 - `--base-url` 指定 API 基址。
 - `--missing-only` 适合快速补缺；如果外部配方变了，仍应跑不带此参数的全量刷新。
 - `--cache-dir` 指定缓存目录，默认 `.herocraft_cache`。
-- `--cookie` 可直接传 `hc_session` 值；不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session`。
+- `--cookie` 可直接传 `hc_session` 值；不传时读取环境变量 `HEROCRAFT_SESSION` 或 `.herocraft_session.txt`。
 - `--timeout` 指定单次请求超时秒数。
 
 关键函数：
