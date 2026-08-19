@@ -10,8 +10,14 @@ HeroCraft 合成树查询与 HTML 可视化工具。
 
 最快使用：
 
-1. 获得 session：浏览器登录 HeroCraft 后，在开发者工具 Network 里打开 `/api/auth/me`，复制请求头里的 `Cookie: hc_session=...`。
-   用文本编辑器打开 `.herocraft_session.txt`，只把 `hc_session=` 后面的值复制粘贴进去，然后保存。
+1. 获得 session：浏览器登录 HeroCraft 后，在开发者工具 Network 里打开 `/api/auth/me`，复制请求头里的 `Cookie: hc_session=...`。然后运行下方的指令。
+
+```powershell
+if (-not (Test-Path .herocraft_session.txt)) { New-Item -ItemType File -Path .herocraft_session.txt | Out-Null }
+notepad .herocraft_session.txt
+```
+
+在打开的文本文件里，只把 `hc_session=` 后面的值复制粘贴进去，然后保存。
 
 1. 同步缓存：
 
