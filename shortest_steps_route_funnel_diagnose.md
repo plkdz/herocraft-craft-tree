@@ -33,3 +33,29 @@ python shortest_steps_route_funnel_diagnose.py diagnostics\shenyang_avenue_26_ch
 - 如果单步配方存在，但对应四基谱表项不存在，就输出“漏斗”。这表示当前有界候选筛选把一条全局可能有用的生成表项剪掉了。
 
 它不替代最短路算法，只负责把“数据缺失”和“候选剪枝漏斗”分开。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_route_funnel_diagnose.py`
+
+### 类和类型
+- `ChainStep`
+
+### 函数
+- `def parse_args() -> argparse.Namespace`
+- `def load_chain(path: str) -> list[ChainStep]`
+- `def name_to_id(name: str, details: dict[int, ApiObject]) -> int`
+- `def source_exists(detail: ApiObject, step: ChainStep, id_by_name: dict[str, int]) -> bool`
+- `def candidate_matches(route: dict[str, Any], step: ChainStep, *, id_by_name: dict[str, int], expected_required_ids: set[int], expected_left_required_ids: set[int], expected_right_required_ids: set[int]) -> tuple[bool, list[str]]`
+- `def main() -> None`
+
+### 命令行参数
+- `chain`：JSON 文件；列表项字段为 result、ingredient_a、operation、ingredient_b
+- `--cache-dir`：缓存目录
+- `--routes`：四基谱表路径；默认缓存目录下 {SHORTEST_STEPS_FILE}
+- `--base-ids`：额外基础元素 id，逗号分隔
+- `--base-names`：基础元素名称，逗号分隔
+<!-- code-sync:end -->

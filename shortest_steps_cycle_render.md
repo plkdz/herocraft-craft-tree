@@ -19,3 +19,23 @@
 
 - 主报告路径会把 `_cycles` 插到时间戳前，例如 `shortest_steps_unreachable_cycles-时间戳.html`。
 - 如果是刷新前报告，对应文件名类似 `shortest_steps_unreachable_cycles-时间戳_before_refresh.html`。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_cycle_render.py`
+
+### 类和类型
+- 无
+
+### 函数
+- `def build_unreachable_dependency_graph(details: dict[int, ApiObject], unreachable_ids: set[int]) -> dict[int, set[int]]`
+- `def strongly_connected_components(graph: dict[int, set[int]]) -> list[set[int]]`
+- `def component_impact_counts(graph: dict[int, set[int]], components: list[set[int]]) -> dict[int, int]`
+- `def build_cycle_html_report(details: dict[int, ApiObject], unreachable_ids: set[int], *, show_id: bool) -> str`
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->

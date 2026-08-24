@@ -49,3 +49,41 @@ python sync_cache.py --only-ids 1,2,3
 - `format_detail_label()`：把详情同步进度里的对象 id 补成人能看的对象标签。
 - `estimate_remaining_seconds()`：按已完成详情请求平均耗时估算剩余时间，没有成功样本时使用限速兜底。
 - `refresh_details()`：按限速顺序同步详情，并输出全局进度位置。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`sync_cache.py`
+
+### 类和类型
+- `DetailFailure`
+
+### 函数
+- `def open_log_file() -> TextIO`
+- `def log_line(log_file: TextIO, message: str) -> None`
+- `def parse_args() -> argparse.Namespace`
+- `def unique_inventory_ids(items: list[ApiObject]) -> list[int]`
+- `def parse_only_ids(raw_value: str) -> list[int]`
+- `def missing_detail_ids(client: HeroCraftClient, object_ids: list[int]) -> list[int]`
+- `def format_detail_label(object_id: int, object_lookup: dict[int, ApiObject]) -> str`
+- `def format_seconds(seconds: float) -> str`
+- `def estimate_remaining_seconds(*, started_at: float, now: float, successful_count: int, remaining_count: int, fallback_seconds_per_item: float) -> float`
+- `def refresh_one_detail(client: HeroCraftClient, object_id: int, detail_delay: float, retry_rounds: int, log_file: TextIO) -> DetailFailure | None`
+- `def refresh_details(client: HeroCraftClient, object_ids: list[int], *, detail_delay: float, retry_rounds: int, log_file: TextIO, start_index: int, total_count: int, object_lookup: dict[int, ApiObject]) -> list[DetailFailure]`
+- `def main() -> None`
+
+### 命令行参数
+- `--cookie`：hc_session 的值；也可以用环境变量 HEROCRAFT_SESSION 或 {SESSION_FILE}
+- `--base-url`：API 基址
+- `--cache-dir`：本机缓存目录
+- `--workers`：并发请求对象详情数量
+- `--request-limit`：同时 HTTP 请求上限
+- `--timeout`：单次请求超时秒数
+- `--missing-only`：只补齐本机没有详情缓存的对象
+- `--requests-per-minute`：每分钟对象详情请求数
+- `--retry-rounds`：详情失败重试轮数
+- `--start-index`：从去重后的详情请求列表第几个对象开始同步，1 表示从头开始
+- `--only-ids`：只同步指定对象 id，逗号分隔；设置后不按物品栏生成详情列表
+<!-- code-sync:end -->

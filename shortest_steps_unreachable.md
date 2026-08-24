@@ -53,3 +53,42 @@ python shortest_steps_unreachable.py --hide-id
 - `refresh_inventory_and_unreachable_details()`：刷新物品栏，只清理和刷新不可达对象。
 - `rebuild_shortest_steps_cache()`：在不可达对象详情配方变化时重算并写回最少步数表；实现位于 `shortest_steps_rebuild.py`。
 - `build_cycle_html_report()`：生成非叶/可能成环不可达对象报告；实现位于 `shortest_steps_cycle_render.py`。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_unreachable.py`
+
+### 类和类型
+- 无
+
+### 函数
+- `def parse_args() -> argparse.Namespace`
+- `def collect_steps_unreachable_ids(details: dict[int, ApiObject], reachable_ids: set[int], *, base_ids: set[int], base_names: set[str], show_progress: bool, started_at: float | None=None) -> set[int]`
+- `def default_output_path() -> str`
+- `def text_output_path(html_output_path: str) -> str`
+- `def output_path_with_label(output_path: str, label: str) -> str`
+- `def cycle_output_path(output_path: str) -> str`
+- `def craft_sources_key(obj: ApiObject | None) -> str`
+- `def refresh_object_detail_with_retry(client: HeroCraftClient, object_id: int, *, retry_rounds: int, retry_delay: float) -> ApiObject | None`
+- `def sync_missing_inventory_details(args: argparse.Namespace) -> None`
+- `def refresh_inventory_and_unreachable_details(args: argparse.Namespace, unreachable_ids: set[int]) -> tuple[set[int], int]`
+- `def write_unreachable_outputs(*, details: dict[int, ApiObject], unreachable_ids: set[int], output_path: str, show_id: bool) -> None`
+- `def main() -> None`
+
+### 命令行参数
+- `--cache-dir`：缓存目录
+- `--routes`：最少步数表路径；默认缓存目录下 {SHORTEST_STEPS_FILE}
+- `--output`：HTML 输出路径；默认写入 {RESULTS_DIR}
+- `--hide-id`：在输出里隐藏对象 id
+- `--dynamic-refresh`：是否先刷新物品栏，并删除不可达对象中已不在物品栏里的详情缓存
+- `--cookie`：hc_session；也可用环境变量或 {SESSION_FILE}
+- `--base-url`：API 基址
+- `--timeout`：动态刷新单次请求超时秒数
+- `--requests-per-minute`：动态刷新每分钟详情请求数
+- `--retry-rounds`：动态刷新单个详情失败重试次数
+- `--candidate-limit`：动态重算每个对象最多保留候选数；0 表示沿用当前表记录的候选上限
+- `--max-iterations`：动态重算最大迭代轮数
+<!-- code-sync:end -->

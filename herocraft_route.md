@@ -20,3 +20,32 @@
 - 每个对象最多保留 `MAX_STEP_ROUTE_CANDIDATES` 条非支配候选路线，避免空间爆炸。
 - 这部分目前方便单独删改，不影响默认最短深度路线。
 - 持久化最少步数表由 `shortest_steps_bottomup_build.py` 自下而上生成，不塞进 HTML 渲染路径。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`herocraft_route.py`
+
+### 类和类型
+- `BaseRoutePlan`
+- `StepRoutePlan`
+
+### 函数
+- `def source_depth_from_plan(source: CraftSource, *, base_ids: set[int], base_names: set[str], route_plan: BaseRoutePlan) -> int | None`
+- `def source_depth_from_depths(source: CraftSource, *, base_ids: set[int], base_names: set[str], depths: dict[int, int]) -> int | None`
+- `def build_base_route_plan(client: HeroCraftClient, target: ApiObject, *, max_depth: int, base_ids: set[int], base_names: set[str]) -> BaseRoutePlan`
+- `def compute_base_depths(details: dict[int, ApiObject], *, max_depth: int, base_ids: set[int], base_names: set[str]) -> dict[int, int]`
+- `def prune_route_sets(route_sets: list[frozenset[int]]) -> tuple[frozenset[int], ...]`
+- `def source_unique_route_sets(source: CraftSource, *, result_id: int, base_ids: set[int], base_names: set[str], route_sets: dict[int, tuple[frozenset[int], ...]]) -> list[frozenset[int]]`
+- `def source_steps_from_plan(source: CraftSource, *, result_id: int, base_ids: set[int], base_names: set[str], route_plan: StepRoutePlan) -> int | None`
+- `def build_step_route_plan(details: dict[int, ApiObject], *, max_depth: int, base_ids: set[int], base_names: set[str], object_ids: set[int] | None=None) -> StepRoutePlan`
+- `def source_base_depth(client: HeroCraftClient, source: CraftSource, *, base_ids: set[int], base_names: set[str], cache: BaseDepthCache, visiting: set[int], remaining_depth: int) -> int | None`
+- `def object_base_depth(client: HeroCraftClient, obj: ApiObject, *, base_ids: set[int], base_names: set[str], cache: BaseDepthCache, visiting: set[int], remaining_depth: int) -> int | None`
+- `def collect_source_depths(client: HeroCraftClient, sources: list[CraftSource], *, base_ids: set[int], base_names: set[str], cache: BaseDepthCache, visiting: set[int], remaining_depth: int, worker_limit: int | None=None) -> list[tuple[CraftSource, int | None]]`
+- `def filter_shortest_base_sources(client: HeroCraftClient, sources: list[CraftSource], *, base_ids: set[int], base_names: set[str], cache: BaseDepthCache, remaining_depth: int, single_shortest_route: bool, route_plan: BaseRoutePlan | None=None) -> tuple[list[CraftSource], int | None, int]`
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->

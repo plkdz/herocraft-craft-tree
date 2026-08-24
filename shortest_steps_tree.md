@@ -76,3 +76,65 @@ python shortest_steps_bottomup_build.py
 - `dynamic_refresh_details()`：沿旧路线刷新目标相关对象详情，并统计配方变化数量。
 - `write_result()`：写出树状 HTML/text 和合成顺序表。
 - `repair_target_routes()`：来自 `shortest_steps_context_repair.py`，只对当前目标做上下文局部候选修复。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_tree.py`
+
+### 类和类型
+- 无
+
+### 函数
+- `def parse_args() -> argparse.Namespace`
+- `def resolve_cached_object(query: str, item_type: str, details: dict[int, ApiObject], *, by_id: bool=False) -> ApiObject`
+- `def refresh_object_detail_with_retry(client: HeroCraftClient, object_id: int, *, detail_delay: float, label: str='', verbose: bool=False, retry_count: int=3) -> ApiObject`
+- `def refresh_missing_target(args: argparse.Namespace, object_id: int) -> ApiObject`
+- `def refresh_inventory_for_dynamic(args: argparse.Namespace) -> None`
+- `def route_object_ids(object_id: int, steps_table: dict[int, dict[str, Any]], route_override: dict[str, Any] | None=None, path: frozenset[int]=frozenset()) -> set[int]`
+- `def route_object_id_order(object_id: int, steps_table: dict[int, dict[str, Any]], route_override: dict[str, Any] | None=None, path: frozenset[int]=frozenset(), emitted: set[int] | None=None) -> list[int]`
+- `def route_recipe_exists(detail: ApiObject, recipe: dict[str, Any]) -> bool`
+- `def route_still_valid(object_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], route_override: dict[str, Any] | None=None, path: frozenset[int]=frozenset()) -> bool`
+- `def craft_sources_key(obj: ApiObject) -> str`
+- `def progress_object_label(object_id: int, obj: ApiObject | None) -> str`
+- `def print_broken_route_hint() -> None`
+- `def select_shortest_actual_route(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], show_id: bool) -> dict[int, dict[str, Any]]`
+- `def write_result(*, target: ApiObject, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], output_format: OutputFormat, output_path: str, show_id: bool, image: bool, image_output: str, image_width: int, image_height: int) -> None`
+- `def dynamic_refresh_details(*, client: HeroCraftClient, target_id: int, steps_table: dict[int, dict[str, Any]], max_refresh: int, detail_delay: float, save_interval: int, expand_depth: int, min_expand_depth: int, verbose: bool) -> tuple[dict[int, ApiObject], int]`
+- `def main() -> None`
+
+### 命令行参数
+- `item`：物品名称或物品 id；默认：{DEFAULT_ITEM}
+- `item_type`：对象类型：元素、物品、装备、生物、概念；默认：{DEFAULT_TYPE}
+- `--id`：把 item 按对象 id 解析；默认按名称解析
+- `--cache-dir`：缓存目录
+- `--routes`：最少步数表路径；默认缓存目录下 {SHORTEST_STEPS_FILE}
+- `--show-id`：显示对象 id
+- `--format`：输出格式
+- `--output`：输出文件路径
+- `--image`：把 HTML 全部展开后截图为完整 PNG；HTML 输出默认开启
+- `--no-image`：只输出 HTML，不生成 PNG
+- `--image-output`：PNG 输出路径；默认跟 HTML 同名
+- `--image-width`：截图视口宽度
+- `--image-height`：截图视口高度
+- `--dynamic-refresh`：是否先输出旧结果，再刷新目标相关对象并重算一次
+- `--cookie`：hc_session；也可用环境变量或 {SESSION_FILE}
+- `--base-url`：API 基址
+- `--timeout`：动态刷新单次请求超时秒数
+- `--requests-per-minute`：动态刷新每分钟详情请求数
+- `--dynamic-max-refresh`：动态刷新最多强刷对象数
+- `--dynamic-save-interval`：动态刷新每多少个对象保存一次详情缓存
+- `--dynamic-min-expand`：即使配方未变化也至少扩散的层数
+- `--dynamic-max-expand`：变化链最多扩散的层数
+- `--dynamic-verbose`：显示动态刷新每次请求、保存和限速等待细节
+- `--base-ids`：动态重算额外基础元素 id，逗号分隔
+- `--base-names`：动态重算基础元素名称，逗号分隔
+- `--candidate-limit`：动态重算每个对象最多保留候选数；0 表示沿用当前表记录的候选上限
+- `--max-iterations`：动态重算最大迭代轮数
+- `--context-repair`：用目标上下文局部重组候选，不写回全局缓存
+- `--context-limit`：上下文局部修复每个节点保留候选数
+- `--context-depth`：上下文局部修复最大递归深度
+- `--context-extra-steps`：上下文局部修复允许中间节点比旧表多出的步数
+<!-- code-sync:end -->

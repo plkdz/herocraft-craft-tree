@@ -24,3 +24,24 @@
 - `render_order_text()`：生成文本顺序表。
 - `build_order_html_document()`：生成独立 HTML 顺序表。
 - `order_output_path_for()`：从旧树状图 HTML 路径生成 `_tree_steps_order-时间戳.html` 路径。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_order_render.py`
+
+### 类和类型
+- `CraftOrderStep`
+
+### 函数
+- `def object_label(object_id: int, *, details: dict[int, ApiObject], show_id: bool) -> str`
+- `def collect_order_steps(object_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], show_id: bool, route_override: dict[str, Any] | None=None, path: frozenset[int]=frozenset(), emitted_ids: set[int] | None=None) -> list[CraftOrderStep]`
+- `def render_order_text(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], show_id: bool) -> list[str]`
+- `def order_output_path_for(tree_output_path: str) -> str`
+- `def build_order_html_document(target: ApiObject, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], show_id: bool) -> str`
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->

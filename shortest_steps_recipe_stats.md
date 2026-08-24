@@ -27,3 +27,40 @@ log2(recipe_count + 1)
 - 这个分数同时覆盖“多数配方没用”的噪声型对象和“有效分支很多”的膨胀型对象。
 - 默认不使用硬阈值，只按连续分数排序输出；`--min-recipes` 和 `--max-effective` 只是人工查看时的过滤条件。
 - 输出 HTML 方便人工看，JSON 方便后续 build 或 probe 读取。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_recipe_stats.py`
+
+### 类和类型
+- `ObjectRecipeStats`
+
+### 函数
+- `def parse_args() -> argparse.Namespace`
+- `def old_steps_of(steps_table: dict[int, dict[str, Any]], object_id: int) -> int | None`
+- `def route_required_set(route: dict[str, Any]) -> set[int]`
+- `def ingredient_required_set(ingredient: ApiObject, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str]) -> set[int] | None`
+- `def recipe_required_set(result_id: int, source: CraftSource, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str]) -> set[int] | None`
+- `def count_dominated(required_sets: list[set[int]]) -> int`
+- `def same_component_recipe_count(result_id: int, sources: list[CraftSource], *, component_by_id: dict[int, int], component_sizes: dict[int, int]) -> int`
+- `def collect_recipe_stats(details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], *, base_ids: set[int], base_names: set[str], show_id: bool) -> list[ObjectRecipeStats]`
+- `def default_output_path(suffix: str) -> str`
+- `def write_html(path: str, rows: list[ObjectRecipeStats], *, title: str) -> None`
+- `def write_stats_json(path: str, rows: list[ObjectRecipeStats]) -> None`
+- `def main() -> None`
+
+### 命令行参数
+- `--cache-dir`：缓存目录
+- `--routes`：最少步数表路径；默认缓存目录下 {SHORTEST_STEPS_FILE}
+- `--output`：HTML 输出路径
+- `--json-output`：JSON 输出路径
+- `--show-id`：是否显示对象 id，默认 true
+- `--base-ids`：额外基础元素 id，逗号分隔
+- `--base-names`：基础元素名称，逗号分隔
+- `--min-recipes`：至少多少条配方才进入报告；0 表示不过滤
+- `--max-effective`：有效配方数不超过多少才进入报告；-1 表示不过滤
+- `--top`：HTML 最多展示多少个对象；0 表示全部
+<!-- code-sync:end -->

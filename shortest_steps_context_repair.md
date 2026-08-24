@@ -79,3 +79,42 @@ $$
 - 只修改内存中的 `steps_table`，并强制保留目标路线引用到的子候选闭包，保证树图和顺序表展开自洽。
 - 默认使用全图底表的候选作为基础；全图底表仍建议用较小参数，例如 `candidate-limit=16`，避免全量构建爆炸。
 - 预算分两档：`--context-limit 24` 时普通种子内部上限是 32，目标旧路线对象上限是 48。不要把整个目标邻域统一放宽到 48，否则组合数会过大。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_context_repair.py`
+
+### 类和类型
+- `RepairResult`
+- `RepairProgress`
+
+### 函数
+- `def format_seconds(seconds: float) -> str`
+- `def resolve_context_search_limit(limit: int) -> int`
+- `def resolve_context_wide_search_limit(limit: int) -> int`
+- `def route_required_set(route: dict[str, Any]) -> frozenset[int]`
+- `def route_sort_key(route: dict[str, Any]) -> tuple[int, tuple[int, ...]]`
+- `def route_context_sort_key(route: dict[str, Any], focus_weights: dict[int, int]) -> tuple[int, int, int, tuple[int, ...]]`
+- `def dedupe_routes(routes: list[dict[str, Any]], *, focus_weights: dict[int, int] | None=None) -> list[dict[str, Any]]`
+- `def prune_routes(routes: list[dict[str, Any]], *, limit: int, focus_weights: dict[int, int] | None=None) -> list[dict[str, Any]]`
+- `def seed_routes(object_id: int, steps_table: dict[int, dict[str, Any]]) -> list[dict[str, Any]]`
+- `def route_identity(route: dict[str, Any]) -> tuple[int | None, tuple[int, ...]]`
+- `def make_route(result_id: int, source: CraftSource, left_route: dict[str, Any], right_route: dict[str, Any]) -> dict[str, Any]`
+- `def collect_focus_weights(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], depth: int) -> dict[int, int]`
+- `def old_step_bound(object_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str]) -> int | None`
+- `def route_candidates(object_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], limit: int, depth: int, max_extra_steps: int, focus_weights: dict[int, int], path: frozenset[int], memo: dict[tuple[int, int], list[dict[str, Any]]], deepest_memo_by_id: dict[int, tuple[int, list[dict[str, Any]]]], visited: set[int], progress: RepairProgress) -> list[dict[str, Any]]`
+- `def estimate_repair_state_count(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], depth: int, max_extra_steps: int) -> int`
+- `def collect_target_neighborhood(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], depth: int, max_extra_steps: int) -> set[int]`
+- `def route_list_identity(routes: list[dict[str, Any]]) -> tuple[tuple[int | None, tuple[int, ...]], ...]`
+- `def local_seed_routes(object_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], limit: int, focus_weights: dict[int, int]) -> list[dict[str, Any]]`
+- `def target_neighborhood_routes(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], limit: int, wide_limit: int, depth: int, max_extra_steps: int, focus_weights: dict[int, int], progress: RepairProgress) -> tuple[list[dict[str, Any]], dict[tuple[int, int], list[dict[str, Any]]], set[int]]`
+- `def merge_repaired_routes(steps_table: dict[int, dict[str, Any]], memo: dict[tuple[int, int], list[dict[str, Any]]], *, limit: int, focus_weights: dict[int, int] | None=None, target_id: int, target_routes: list[dict[str, Any]]) -> dict[int, dict[str, Any]]`
+- `def repair_target_routes(target_id: int, *, details: dict[int, ApiObject], steps_table: dict[int, dict[str, Any]], base_ids: set[int], base_names: set[str], limit: int, depth: int, max_extra_steps: int=4, show_progress: bool=False) -> RepairResult`
+- `def _self_test() -> None`
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->

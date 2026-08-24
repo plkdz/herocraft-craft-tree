@@ -31,3 +31,20 @@
 - `my_objects()` 会先取第一页，再并发拉取剩余物品栏分页。
 - 缓存读写使用锁保护，异常和中断时入口会主动保存缓存。
 - 开启 `--refresh-inventory` 时，当前账号已发现物品列表会重新拉取。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`herocraft_client.py`
+
+### 类和类型
+- `ClientConfig`
+- `HeroCraftClient`
+
+### 函数
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->

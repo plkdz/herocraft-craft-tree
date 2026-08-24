@@ -300,3 +300,66 @@ $$
 - `prune_candidates()`：删除被更小路途对象集合支配的四基谱表项，并在超过上限时按步数窗口、单步配方分桶和共享权重做有损截断。
 - `build_output_payload()`：生成可持久化 JSON。
 - `write_json()`：带 `.tmp`、`.bak` 和短重试的 JSON 落盘。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_steps_bottomup_build.py`
+
+### 类和类型
+- `StepCandidate`
+- `RecipeEdge`
+- `BuildResult`
+- `EdgePreprocessStats`
+
+### 函数
+- `def parse_args() -> argparse.Namespace`
+- `def load_detail_cache(cache_dir: str) -> dict[int, ApiObject]`
+- `def resolve_base_ids(details: dict[int, ApiObject], *, base_ids: set[int], base_names: set[str]) -> set[int]`
+- `def build_id_bit_maps(details: dict[int, ApiObject]) -> tuple[dict[int, int], list[int]]`
+- `def mask_to_ids(mask: int, bit_to_id: list[int]) -> list[int]`
+- `def mask_count(mask: int) -> int`
+- `def candidate_sort_key(candidate: StepCandidate) -> tuple[int, int]`
+- `def candidate_recipe_key(candidate: StepCandidate) -> tuple[Any, ...]`
+- `def candidate_material_cost(candidate: StepCandidate) -> int`
+- `def weighted_candidate_sort_key(candidate: StepCandidate, weights_by_bit: Sequence[int]) -> tuple[Any, ...]`
+- `def mask_is_subset(left: int, right: int) -> bool`
+- `def mask_weight(mask: int, weights_by_bit: Sequence[int]) -> int`
+- `def prune_candidates(candidates: list[StepCandidate], *, limit: int, weights_by_bit: Sequence[int] | None=None, weighted_step_window: int=PROPAGATION_WEIGHTED_STEP_WINDOW) -> tuple[StepCandidate, ...]`
+- `def dependency_weights_by_bit(old_required_ids_by_id: dict[int, set[int]], id_to_bit: dict[int, int]) -> list[int]`
+- `def resolve_search_candidate_limit(candidate_limit: int, search_candidate_limit: int | None) -> int`
+- `def build_recipe_edges(details: dict[int, ApiObject]) -> tuple[RecipeEdge, ...]`
+- `def build_dependency_components(details: dict[int, ApiObject]) -> tuple[dict[int, int], dict[int, int]]`
+- `def ingredient_upper_bound(ingredient: ApiObject, *, old_steps_by_id: dict[int, int], base_ids: set[int], base_names: set[str]) -> int | None`
+- `def edge_preprocess_key(edge: RecipeEdge, *, edge_index: int, old_steps_by_id: dict[int, int], base_ids: set[int], base_names: set[str], component_by_id: dict[int, int], component_sizes: dict[int, int], dominated_edge_indexes: set[int], result_risk_scores: dict[int, float], edge_estimated_costs: dict[int, int], edge_required_sizes: dict[int, int]) -> tuple[int, int, int, int, int, int, float, int, int]`
+- `def ingredient_required_ids(ingredient: ApiObject, *, old_required_ids_by_id: dict[int, set[int]], base_ids: set[int], base_names: set[str]) -> set[int] | None`
+- `def edge_known_required_ids(edge: RecipeEdge, *, old_required_ids_by_id: dict[int, set[int]], base_ids: set[int], base_names: set[str]) -> set[int] | None`
+- `def search_risk_score(*, recipe_count: int, known_recipe_count: int, dominated_recipe_count: int, effective_recipe_count: int, same_component_recipe_count: int) -> float`
+- `def recipe_dominance_marks_and_risk(edges: tuple[RecipeEdge, ...], *, old_steps_by_id: dict[int, int], old_required_ids_by_id: dict[int, set[int]], base_ids: set[int], base_names: set[str], component_by_id: dict[int, int], component_sizes: dict[int, int]) -> tuple[set[int], dict[int, float], dict[int, int], dict[int, int]]`
+- `def edge_preprocess_stats(edges: tuple[RecipeEdge, ...], *, old_steps_by_id: dict[int, int], component_by_id: dict[int, int], component_sizes: dict[int, int], dominated_edge_indexes: set[int], result_risk_scores: dict[int, float]) -> EdgePreprocessStats`
+- `def source_candidates(source: CraftSource, *, result_id: int, candidates_by_id: dict[int, tuple[StepCandidate, ...]], base_ids: set[int], base_names: set[str], candidate_limit: int, result_bit: int, weights_by_bit: Sequence[int] | None) -> tuple[StepCandidate, ...]`
+- `def edge_candidates(edge: RecipeEdge, *, candidates_by_id: dict[int, tuple[StepCandidate, ...]], base_ids: set[int], base_names: set[str], candidate_limit: int, id_to_bit: dict[int, int], weights_by_bit: Sequence[int] | None) -> tuple[StepCandidate, ...]`
+- `def build_shortest_steps(details: dict[int, ApiObject], *, base_ids: set[int], base_names: set[str], candidate_limit: int, search_candidate_limit: int | None=None, max_iterations: int, show_progress: bool, old_steps_by_id: dict[int, int] | None=None, old_required_ids_by_id: dict[int, set[int]] | None=None) -> BuildResult`
+- `def best_candidate(candidates: tuple[StepCandidate, ...]) -> StepCandidate`
+- `def candidate_record(candidate: StepCandidate, *, bit_to_id: list[int]) -> dict[str, Any]`
+- `def step_record(obj: ApiObject, candidates: tuple[StepCandidate, ...], *, bit_to_id: list[int]) -> dict[str, Any]`
+- `def collect_referenced_candidates(object_id: int, candidate: StepCandidate, *, details: dict[int, ApiObject], records_by_id: dict[int, dict[tuple[int, int], StepCandidate]]) -> None`
+- `def build_output_payload(details: dict[int, ApiObject], build_result: BuildResult, *, base_ids: set[int], base_names: set[str], candidate_limit: int, show_progress: bool=False) -> dict[str, Any]`
+- `def write_json(path: str, payload: dict[str, Any], *, show_progress: bool=False) -> None`
+- `def route_required_ids(route: dict[str, Any]) -> set[int]`
+- `def load_existing_route_hints(path: str) -> tuple[dict[int, int], dict[int, set[int]]]`
+- `def self_test() -> None`
+- `def main() -> None`
+
+### 命令行参数
+- `--cache-dir`：缓存目录
+- `--output`：输出文件，默认写入缓存目录下 {SHORTEST_STEPS_FILE}
+- `--base-ids`：额外基础元素 id，逗号分隔
+- `--base-names`：基础元素名称，逗号分隔
+- `--candidate-limit`：每个对象最终最多保留的四基谱表项数
+- `--search-candidate-limit`：内部传播四基谱表项上限；0 表示自动取 candidate-limit + 8，最高 32
+- `--max-iterations`：最大固定点迭代轮数
+- `--self-test`：运行内置自检，不读取缓存
+<!-- code-sync:end -->

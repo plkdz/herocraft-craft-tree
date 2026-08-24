@@ -27,3 +27,42 @@
 - 这里不发网络请求。
 - 这里不读写缓存文件。
 - 新增共享类型和纯函数优先放这里，避免入口文件和渲染文件互相塞工具函数。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`herocraft_core.py`
+
+### 类和类型
+- `ApiObject`
+- `CraftSource`
+- `ObjectPage`
+- `ProgressStats`
+
+### 函数
+- `def require_id(obj: ApiObject) -> int`
+- `def format_type(obj: ApiObject) -> str`
+- `def format_object(obj: ApiObject, *, show_id: bool=False, show_type: bool=True) -> str`
+- `def format_type_filter(type_filter: set[str] | None) -> str`
+- `def format_operation(operation: str) -> str`
+- `def iter_sources(detail: ApiObject) -> Iterable[CraftSource]`
+- `def is_base_object(obj: ApiObject, *, base_ids: set[int], base_names: set[str]) -> bool`
+- `def safe_filename_part(value: str) -> str`
+- `def default_output_path(target: ApiObject, output_format: OutputFormat) -> str`
+- `def output_path_with_label_before_timestamp(output_path: str, label: str, default_extension: str='', *, extension_override: str | None=None) -> str`
+- `def fail(message: str) -> NoReturn`
+- `def parse_int_set(raw_value: str) -> set[int]`
+- `def parse_name_set(raw_value: str) -> set[str]`
+- `def parse_bool(value: str | bool) -> bool`
+- `def parse_type_filter(raw_value: str) -> set[str] | None`
+- `def is_session_edge_char(char: str) -> bool`
+- `def strip_session_edge_chars(value: str) -> str`
+- `def clean_session_cookie(raw_value: str) -> str`
+- `def load_session_from_file(path: str=SESSION_FILE) -> str`
+- `def demo_session_cookie_cleaning() -> None`
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->

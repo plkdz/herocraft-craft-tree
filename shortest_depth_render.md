@@ -24,3 +24,24 @@ HTML 交互：
 - `build_tree_text()`：输出文本树。
 - `build_tree_html_node()`：递归组装通用 `HtmlTreeNode`。
 - `build_html_document()`：生成完整 HTML 页面，底层调用 `tree_html_render.py`。
+
+<!-- code-sync:start -->
+## 代码同步清单
+
+> 本节由对应 `.py` 的当前结构同步，用于存档核对。
+
+来源：`shortest_depth_render.py`
+
+### 类和类型
+- 无
+
+### 函数
+- `def prefetch_source_ingredients(client: HeroCraftClient, sources: list[CraftSource], *, base_ids: set[int], base_names: set[str], path: tuple[int, ...]) -> None`
+- `def build_tree_text(client: HeroCraftClient, obj: ApiObject, *, max_depth: int, base_ids: set[int], base_names: set[str], show_id: bool, global_dedupe: bool, shortest_base_only: bool, single_shortest_route: bool, base_depth_cache: BaseDepthCache, route_plan: BaseRoutePlan | None, expanded_ids: set[int], current_depth: int=0, path: tuple[int, ...]=(), prefix: str='', branch_label: str='') -> list[str]`
+- `def print_tree(client: HeroCraftClient, obj: ApiObject, *, max_depth: int, base_ids: set[int], base_names: set[str], show_id: bool, global_dedupe: bool, shortest_base_only: bool, single_shortest_route: bool, base_depth_cache: BaseDepthCache, route_plan: BaseRoutePlan | None, expanded_ids: set[int], current_depth: int=0, path: tuple[int, ...]=(), prefix: str='', branch_label: str='') -> None`
+- `def build_tree_html_node(client: HeroCraftClient, obj: ApiObject, *, max_depth: int, base_ids: set[int], base_names: set[str], show_id: bool, global_dedupe: bool, shortest_base_only: bool, single_shortest_route: bool, base_depth_cache: BaseDepthCache, route_plan: BaseRoutePlan | None, expanded_ids: set[int], current_depth: int=0, path: tuple[int, ...]=(), branch_label: str='') -> HtmlTreeNode`
+- `def build_html_document(client: HeroCraftClient, target: ApiObject, *, max_depth: int, base_ids: set[int], base_names: set[str], show_id: bool, global_dedupe: bool, shortest_base_only: bool, single_shortest_route: bool, base_depth_cache: BaseDepthCache, route_plan: BaseRoutePlan | None) -> str`
+
+### 命令行参数
+- 无
+<!-- code-sync:end -->
