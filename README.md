@@ -2,6 +2,24 @@
 
 HeroCraft 合成树查询与 HTML 可视化工具。
 
+生成示例：
+
+树状图：
+
+![电脑装备最少步数树](docs/readme-images/computer-tree.png)
+
+顺序图：
+
+![电脑装备合成顺序](docs/readme-images/computer-tree_order.png)
+
+缺失物品阻塞图：
+
+![最少步数缺失物品阻塞图](docs/readme-images/unreachable-blockers.png)
+
+当前缺失物品清单：
+
+![最少步数缺失物品清单](docs/readme-images/unreachable-list.png)
+
 运行环境：
 
 - Python 3.9+。
